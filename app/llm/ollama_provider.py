@@ -15,6 +15,8 @@ class OllamaProvider(LLMProvider):
                     "model": config.OLLAMA_MODEL,
                     "stream": False,
                     "format": "json",
+                    "keep_alive": "30m",
+                    "options": {"temperature": 0, "num_ctx": 2048},
                     "messages": [
                         {"role": "system", "content": system},
                         {"role": "user", "content": user},
