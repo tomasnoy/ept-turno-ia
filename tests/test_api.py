@@ -1,12 +1,5 @@
-import warnings
-from datetime import datetime
-
-import pytest
-
-from app import config, main
+from app import main
 from app.llm.base import LLMError, LLMProvider
-
-AHORA = datetime(2026, 9, 21, 10, 0)  # lunes
 
 
 class FakeProvider(LLMProvider):
@@ -17,19 +10,6 @@ class FakeProvider(LLMProvider):
         if isinstance(self.response, Exception):
             raise self.response
         return self.response
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(config, "DB_PATH", str(tmp_path / "test.db"))
-    main.app.dependency_overrides[main.get_now] = lambda: AHORA
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        from fastapi.testclient import TestClient
-
-        with TestClient(main.app) as c:
-            yield c
-    main.app.dependency_overrides.clear()
 
 
 def usar_modelo(response):

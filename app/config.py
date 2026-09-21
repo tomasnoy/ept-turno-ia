@@ -16,3 +16,6 @@ DB_PATH = os.getenv("DB_PATH", "data/turnos.db")
 
 TIMEZONE = os.getenv("TIMEZONE", "America/Argentina/Buenos_Aires")
 BUSINESS_NAME = os.getenv("BUSINESS_NAME", "Peluquería Demo")
+
+# Clave del panel del negocio. Si esta vacia, el panel queda deshabilitado.
+ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")

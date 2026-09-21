@@ -2,16 +2,15 @@ import re
 from contextlib import asynccontextmanager
 from datetime import date, datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from app import config, db, flow, scheduling, seed
+from app import admin, config, db, flow, scheduling, seed
+from app.deps import get_conn, get_llm, get_now
 from app.llm.base import LLMError, LLMProvider
-from app.llm.factory import get_provider
 
 STATIC_DIR = Path(__file__).resolve().parent.parent / "static"
 
@@ -27,23 +26,7 @@ async def lifespan(_: FastAPI):
 
 
 app = FastAPI(title="Gestor de turnos con IA", lifespan=lifespan)
-
-
-def get_conn():
-    conn = db.connect()
-    try:
-        yield conn
-    finally:
-        conn.close()
-
-
-def get_llm() -> LLMProvider:
-    return get_provider()
-
-
-def get_now() -> datetime:
-    """Hora local del negocio (el servidor puede estar en otra zona horaria)."""
-    return datetime.now(ZoneInfo(config.TIMEZONE)).replace(tzinfo=None)
+app.include_router(admin.router)
 
 
 class ContextIn(BaseModel):
@@ -166,6 +149,11 @@ def book(body: BookIn, conn=Depends(get_conn)) -> dict:
 @app.get("/")
 def index() -> FileResponse:
     return FileResponse(STATIC_DIR / "index.html")
+
+
+@app.get("/admin")
+def admin_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "admin.html")
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

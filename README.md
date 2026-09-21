@@ -31,5 +31,13 @@ cp .env.example .env                            # y completar lo que corresponda
 - [x] Capa de proveedores de IA (Ollama / Anthropic)
 - [x] Agente de interpretación de pedidos (`app/agents/interpreter.py`)
 - [x] API y chat de reserva (`app/main.py`, `app/flow.py`, `static/index.html`)
-- [ ] Agente de reacomodo ante cancelaciones
+- [x] Panel del negocio: agenda por día, filtros y cancelación (`/admin`, protegido con clave)
+- [ ] Lista de espera y reacomodo ante cancelaciones
 - [ ] Despliegue
+
+## Panel del negocio
+
+Ruta `/admin`. Muestra las reservas por día, permite filtrar por profesional y cancelar turnos.
+Se protege con una clave compartida: hay que definir `ADMIN_TOKEN` en el `.env` del servidor.
+Si no está definida, el panel queda deshabilitado (nunca abierto por omisión). Tras 10 intentos
+fallidos se bloquea temporalmente el acceso.
