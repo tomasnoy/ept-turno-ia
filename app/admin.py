@@ -4,8 +4,9 @@ import sqlite3
 from datetime import date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
-from app import scheduling
+from app import scheduling, waitlist
 from app.auth import require_admin
 from app.deps import get_conn, get_now
 
@@ -57,11 +58,55 @@ def agenda(day: date | None = None, conn: sqlite3.Connection = Depends(get_conn)
 
 
 @router.post("/appointments/{appointment_id}/cancel")
-def cancel(appointment_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
-    row = conn.execute("SELECT status FROM appointments WHERE id = ?", (appointment_id,)).fetchone()
+def cancel(
+    appointment_id: int, conn: sqlite3.Connection = Depends(get_conn), now: datetime = Depends(get_now)
+) -> dict:
+    row = conn.execute("SELECT status, start FROM appointments WHERE id = ?", (appointment_id,)).fetchone()
     if row is None:
         raise HTTPException(404, "El turno no existe.")
     if row["status"] == "cancelled":
         raise HTTPException(409, "Ese turno ya estaba cancelado.")
     scheduling.cancel(conn, appointment_id)
-    return {"appointment_id": appointment_id, "status": "cancelled"}
+    # Reacomodo: a quien esta esperando se le puede ofrecer el lugar que se acaba de liberar.
+    freed_day = datetime.fromisoformat(row["start"]).date()
+    matches = waitlist.matches_for_day(conn, freed_day, now)
+    return {
+        "appointment_id": appointment_id,
+        "status": "cancelled",
+        "waitlist_matches": [{"id": m["id"], "customer": m["customer"]} for m in matches],
+    }
+
+
+class GiveSlotIn(BaseModel):
+    professional_id: int
+    start: datetime
+
+
+@router.get("/waitlist")
+def waiting(conn: sqlite3.Connection = Depends(get_conn), now: datetime = Depends(get_now)) -> dict:
+    return {"entries": waitlist.waiting_list(conn, now)}
+
+
+@router.post("/waitlist/{entry_id}/book")
+def give_slot(entry_id: int, body: GiveSlotIn, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+    """Le da el turno a quien esperaba: crea la reserva y lo saca de la lista."""
+    try:
+        appointment_id = waitlist.fulfill(conn, entry_id, body.professional_id, body.start)
+    except waitlist.EntryNotFound:
+        raise HTTPException(404, "Esa persona ya no está en la lista.")
+    except waitlist.EntryNotWaiting:
+        raise HTTPException(409, "Esa persona ya fue atendida o quitada de la lista.")
+    except scheduling.SlotUnavailable:
+        raise HTTPException(409, "Ese horario ya no está disponible para esa persona. Actualizá la lista.")
+    return {"appointment_id": appointment_id}
+
+
+@router.post("/waitlist/{entry_id}/remove")
+def remove_from_waitlist(entry_id: int, conn: sqlite3.Connection = Depends(get_conn)) -> dict:
+    try:
+        waitlist.remove(conn, entry_id)
+    except waitlist.EntryNotFound:
+        raise HTTPException(404, "Esa persona ya no está en la lista.")
+    except waitlist.EntryNotWaiting:
+        raise HTTPException(409, "Esa persona ya fue atendida o quitada de la lista.")
+    return {"entry_id": entry_id, "status": "removed"}

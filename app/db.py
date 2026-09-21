@@ -39,12 +39,16 @@ CREATE TABLE IF NOT EXISTS appointments (
     status TEXT NOT NULL DEFAULT 'confirmed'
 );
 
+-- status: waiting | fulfilled | removed. part_of_day: any | morning | afternoon | evening
 CREATE TABLE IF NOT EXISTS waitlist (
     id INTEGER PRIMARY KEY,
     customer_id INTEGER NOT NULL REFERENCES customers(id),
     service_id INTEGER NOT NULL REFERENCES services(id),
     professional_id INTEGER REFERENCES professionals(id),
-    day TEXT NOT NULL
+    day TEXT NOT NULL,
+    part_of_day TEXT NOT NULL DEFAULT 'any',
+    status TEXT NOT NULL DEFAULT 'waiting',
+    created_at TEXT NOT NULL DEFAULT ''
 );
 """
 
@@ -56,6 +60,21 @@ def connect(path: str | None = None) -> sqlite3.Connection:
     return conn
 
 
+# Columnas agregadas despues de la primera version del esquema, para bases ya creadas.
+MIGRATIONS = {
+    "waitlist": {
+        "part_of_day": "TEXT NOT NULL DEFAULT 'any'",
+        "status": "TEXT NOT NULL DEFAULT 'waiting'",
+        "created_at": "TEXT NOT NULL DEFAULT ''",
+    }
+}
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    for table, columns in MIGRATIONS.items():
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name, definition in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
     conn.commit()

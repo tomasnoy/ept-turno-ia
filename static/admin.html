@@ -78,6 +78,16 @@
   @media (prefers-color-scheme: dark) { .danger { color: #1a1220; } }
   .empty { text-align: center; color: var(--muted); padding: 36px 12px; background: var(--card); border: 1px dashed var(--line); border-radius: 14px; }
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 999px; font-size: .95rem; max-width: 90vw; }
+  /* Lista de espera */
+  .wait { margin-top: 26px; scroll-margin-top: 12px; }
+  .wait h2 { margin: 0 0 4px; font-size: 1.2rem; }
+  .wait > p { margin: 0 0 12px; color: var(--muted); font-size: .95rem; }
+  .card.wait-card { grid-template-columns: 1fr; }
+  .card.wait-card .actions { grid-column: 1; }
+  .badge.ok { background: var(--ok); color: var(--bg); margin-left: 8px; }
+  .offers { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+  .offer { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px; padding: 8px 14px; min-height: 44px; font-weight: 600; }
+  .card.hot { border-color: var(--ok); box-shadow: 0 0 0 2px var(--ok) inset; }
   .updated { font-size: .82rem; color: var(--muted); margin-top: 14px; text-align: right; }
   [hidden] { display: none !important; }
 </style>
@@ -115,10 +125,16 @@
   <div class="filters">
     <select id="pro" aria-label="Filtrar por profesional"><option value="">Todos los profesionales</option></select>
     <label><input type="checkbox" id="showCancelled"> Mostrar cancelados</label>
+    <button class="link" id="goWait" type="button">Lista de espera</button>
   </div>
 
   <p class="summary" id="summary" aria-live="polite"></p>
   <ul class="list" id="list"></ul>
+  <section class="wait" id="waitSection" aria-labelledby="waitTitle">
+    <h2 id="waitTitle">Lista de espera <span id="waitCount"></span></h2>
+    <p>Clientes que no encontraron lugar. Se ordenan por llegada: ofrecé primero al que lleva más tiempo esperando.</p>
+    <ul class="list" id="waitList"></ul>
+  </section>
   <p class="updated" id="updated"></p>
 </div>
 <div class="toast" id="toast" role="status" hidden></div>
@@ -129,7 +145,7 @@
                   set: (v) => { try { sessionStorage.setItem("adminKey", v); } catch (_) {} },
                   clear: () => { try { sessionStorage.removeItem("adminKey"); } catch (_) {} } };
   let key = store.get();
-  let day = null, today = null, data = null, timer = null;
+  let day = null, today = null, data = null, timer = null, waiting = [];
 
   function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; }
   const fmt = (iso, opts) => new Date(iso + "T12:00:00").toLocaleDateString("es-AR", opts);
@@ -140,8 +156,10 @@
     clearTimeout(toast.h); toast.h = setTimeout(() => (t.hidden = true), 3500);
   }
 
-  async function api(path, method = "GET") {
-    const resp = await fetch(path, { method, headers: { "X-Admin-Token": key || "" } });
+  async function api(path, method = "GET", payload) {
+    const headers = { "X-Admin-Token": key || "" };
+    if (payload) headers["Content-Type"] = "application/json";
+    const resp = await fetch(path, { method, headers, body: payload ? JSON.stringify(payload) : undefined });
     let body = {};
     try { body = await resp.json(); } catch (_) {}
     if (!resp.ok) { const e = new Error(body.detail || "Ocurrió un error. Probá de nuevo."); e.status = resp.status; throw e; }
@@ -164,6 +182,12 @@
     day = data.day; today = data.upcoming[0].day;
     $("login").hidden = true; $("app").hidden = false;
     render();
+    await loadWaitlist();
+  }
+
+  async function loadWaitlist() {
+    try { waiting = (await api("/api/admin/waitlist")).entries; } catch (_) { /* la agenda sigue funcionando */ }
+    renderWaitlist();
   }
 
   function render() {
@@ -226,24 +250,89 @@
     return li;
   }
 
+  // Paso de confirmacion en el lugar: evita acciones por error sin abrir ventanas emergentes.
+  function confirmStep(box, question, yesText, yesClass, action) {
+    const before = [...box.childNodes];
+    box.dataset.confirming = "1";
+    box.replaceChildren(el("span", "meta", question));
+    const yes = el("button", yesClass, yesText); yes.type = "button";
+    const no = el("button", "ghost", "No, volver"); no.type = "button";
+    no.addEventListener("click", () => { delete box.dataset.confirming; box.replaceChildren(...before); });
+    yes.addEventListener("click", async () => {
+      yes.disabled = no.disabled = true; yes.textContent = "Un momento…";
+      try { await action(); } catch (err) { toast(err.message); }
+      delete box.dataset.confirming;
+      load(day);
+    });
+    box.append(yes, no);
+  }
+
   function cancelControls(a) {
     const box = el("div", "actions");
     const start = el("button", "link", "Cancelar turno"); start.type = "button";
-    start.addEventListener("click", () => {
-      box.replaceChildren(el("span", "meta", "¿Cancelar este turno?"));
-      const yes = el("button", "danger", "Sí, cancelar"); yes.type = "button";
-      const no = el("button", "ghost", "No, volver"); no.type = "button";
-      no.addEventListener("click", () => box.replaceChildren(start));
-      yes.addEventListener("click", async () => {
-        yes.disabled = no.disabled = true; yes.textContent = "Cancelando…";
-        try { await api(`/api/admin/appointments/${a.id}/cancel`, "POST"); toast("Turno cancelado. El horario quedó libre."); }
-        catch (err) { toast(err.message); }
-        load(day);
-      });
-      box.append(yes, no);
-    });
+    start.addEventListener("click", () => confirmStep(box, "¿Cancelar este turno?", "Sí, cancelar", "danger", async () => {
+      const r = await api(`/api/admin/appointments/${a.id}/cancel`, "POST");
+      if (r.waitlist_matches.length) {
+        const names = r.waitlist_matches.map((m) => m.customer).join(", ");
+        toast(`Turno cancelado. Podés ofrecer el lugar a: ${names}`);
+        setTimeout(() => $("waitSection").scrollIntoView({ behavior: "smooth" }), 400);
+      } else {
+        toast("Turno cancelado. El horario quedó libre.");
+      }
+    }));
     box.appendChild(start);
     return box;
+  }
+
+  const PARTS = { any: "cualquier horario", morning: "a la mañana", afternoon: "a la tarde", evening: "a la noche" };
+
+  function renderWaitlist() {
+    $("waitCount").textContent = waiting.length ? `(${waiting.length})` : "";
+    $("goWait").textContent = waiting.length ? `Lista de espera (${waiting.length})` : "Lista de espera";
+    const list = $("waitList"); list.replaceChildren();
+    if (!waiting.length) {
+      list.appendChild(el("li", "empty", "Nadie en lista de espera. Cuando un cliente no encuentre lugar, va a aparecer acá."));
+      return;
+    }
+    waiting.forEach((w) => list.appendChild(waitCard(w)));
+  }
+
+  function waitCard(w) {
+    const li = el("li", "card wait-card" + (w.offers.length ? " hot" : ""));
+    const info = el("div");
+    const who = el("div", "who", w.customer);
+    if (w.offers.length) who.appendChild(el("span", "badge ok", "Hay lugar"));
+    const when = fmt(w.day, { weekday: "long", day: "numeric", month: "long" });
+    info.append(who, el("div", "meta", `${w.service} · ${when} · ${PARTS[w.part_of_day] || w.part_of_day}` + (w.professional ? ` · con ${w.professional}` : "")));
+    if (w.phone) {
+      const phone = el("div", "meta"); const link = el("a", "", w.phone); link.href = "tel:" + w.phone.replace(/[^0-9+]/g, "");
+      phone.append("Tel: ", link, ` · anotado/a el ${fmt(w.created_at.slice(0, 10), { day: "numeric", month: "numeric" })}`);
+      info.appendChild(phone);
+    }
+    li.appendChild(info);
+
+    const box = el("div", "actions");
+    if (w.offers.length) {
+      const offers = el("div", "offers");
+      w.offers.forEach((o) => {
+        const b = el("button", "offer", `Dar turno ${o.label}`); b.type = "button";
+        b.addEventListener("click", () => confirmStep(box, `¿Dar el turno de ${o.label} a ${w.customer}?`, "Sí, dar turno", "primary", async () => {
+          await api(`/api/admin/waitlist/${w.id}/book`, "POST", { professional_id: o.professional_id, start: o.start });
+          toast(`Turno asignado a ${w.customer}. Avisale por teléfono.`);
+        }));
+        offers.appendChild(b);
+      });
+      box.appendChild(offers);
+    } else {
+      box.appendChild(el("span", "meta", "Todavía no hay lugar para esta persona."));
+    }
+    const remove = el("button", "link", "Quitar de la lista"); remove.type = "button";
+    remove.addEventListener("click", () => confirmStep(box, `¿Quitar a ${w.customer} de la lista?`, "Sí, quitar", "danger", async () => {
+      await api(`/api/admin/waitlist/${w.id}/remove`, "POST"); toast("Quitado de la lista de espera.");
+    }));
+    box.appendChild(remove);
+    li.appendChild(box);
+    return li;
   }
 
   function shift(delta) {
@@ -262,11 +351,12 @@
   $("today").addEventListener("click", () => load(today));
   $("pro").addEventListener("change", render);
   $("showCancelled").addEventListener("change", render);
+  $("goWait").addEventListener("click", () => $("waitSection").scrollIntoView({ behavior: "smooth" }));
 
   function start() {
     load();
     clearInterval(timer);
-    timer = setInterval(() => { if (!document.hidden && day) load(day); }, 60000);  // nuevas reservas sin recargar
+    timer = setInterval(() => { if (!document.hidden && day && !document.querySelector('[data-confirming]')) load(day); }, 60000);  // nuevas reservas sin recargar
   }
 
   fetch("/api/business").then((r) => r.json()).then((b) => {

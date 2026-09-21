@@ -1,6 +1,6 @@
 import re
 from contextlib import asynccontextmanager
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException
@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from app import admin, config, db, flow, scheduling, seed
+from app import admin, config, customers, db, flow, scheduling, seed, waitlist
 from app.deps import get_conn, get_llm, get_now
 from app.llm.base import LLMError, LLMProvider
 
@@ -40,6 +40,22 @@ class ChatIn(BaseModel):
     context: ContextIn = ContextIn()
 
 
+def _clean_name(value: str) -> str:
+    value = value.strip()
+    if len(value) < 2:
+        raise ValueError("El nombre es demasiado corto")
+    return value
+
+
+def _clean_phone(value: str | None) -> str | None:
+    if value is None or not value.strip():
+        return None
+    value = value.strip()
+    if not re.fullmatch(r"[0-9+\-() ]{6,20}", value):
+        raise ValueError("El teléfono solo puede tener números, espacios, + - ( )")
+    return value
+
+
 class BookIn(BaseModel):
     customer_name: str = Field(min_length=2, max_length=80)
     phone: str | None = Field(default=None, max_length=20)
@@ -47,23 +63,30 @@ class BookIn(BaseModel):
     service_id: int
     start: datetime
 
-    @field_validator("customer_name")
+    _name = field_validator("customer_name")(_clean_name)
+    _phone = field_validator("phone")(_clean_phone)
+
+
+class WaitlistIn(BaseModel):
+    customer_name: str = Field(min_length=2, max_length=80)
+    phone: str = Field(min_length=6, max_length=20)  # obligatorio: el negocio tiene que poder avisar
+    service_id: int
+    professional_id: int | None = None
+    day: date
+    part_of_day: str = "any"
+
+    _name = field_validator("customer_name")(_clean_name)
+    _phone = field_validator("phone")(_clean_phone)
+
+    @field_validator("part_of_day")
     @classmethod
-    def _clean_name(cls, value: str) -> str:
-        value = value.strip()
-        if len(value) < 2:
-            raise ValueError("El nombre es demasiado corto")
+    def _valid_part(cls, value: str) -> str:
+        if value not in ("any", "morning", "afternoon", "evening"):
+            raise ValueError("Franja horaria invalida")
         return value
 
-    @field_validator("phone")
-    @classmethod
-    def _clean_phone(cls, value: str | None) -> str | None:
-        if value is None or not value.strip():
-            return None
-        value = value.strip()
-        if not re.fullmatch(r"[0-9+\-() ]{6,20}", value):
-            raise ValueError("El teléfono solo puede tener números, espacios, + - ( )")
-        return value
+
+MAX_WAITLIST_DAYS_AHEAD = 60
 
 
 @app.get("/health")
@@ -104,6 +127,15 @@ def chat(
             }
             for o in result.options
         ],
+        "waitlist": None
+        if result.waitlist is None
+        else {
+            "service_id": result.waitlist.service_id,
+            "professional_id": result.waitlist.professional_id,
+            "day": result.waitlist.day.isoformat(),
+            "part_of_day": result.waitlist.part_of_day,
+            "label": result.waitlist.label,
+        },
         "context": {
             "service_id": result.context.service_id,
             "professional_id": result.context.professional_id,
@@ -120,18 +152,13 @@ def book(body: BookIn, conn=Depends(get_conn)) -> dict:
     if body.service_id not in services or body.professional_id not in professionals:
         raise HTTPException(400, "Servicio o profesional inexistente")
 
-    customer_id = None
-    if body.phone:
-        row = conn.execute("SELECT id FROM customers WHERE phone = ?", (body.phone,)).fetchone()
-        customer_id = row["id"] if row else None
+    customer_id = customers.find_by_phone(conn, body.phone)
     try:
         # El turno se valida antes de crear al cliente, asi un horario ocupado no deja registros sueltos.
         if body.start not in scheduling.free_slots(conn, body.professional_id, body.service_id, body.start.date()):
             raise scheduling.SlotUnavailable(body.start.isoformat())
         if customer_id is None:
-            customer_id = conn.execute(
-                "INSERT INTO customers (name, phone) VALUES (?, ?)", (body.customer_name, body.phone)
-            ).lastrowid
+            customer_id = customers.create(conn, body.customer_name, body.phone)
         appointment_id = scheduling.book(
             conn, customer_id, body.professional_id, body.service_id, body.start
         )
@@ -144,6 +171,30 @@ def book(body: BookIn, conn=Depends(get_conn)) -> dict:
             f"{flow.day_label(body.start.date())} a las {body.start:%H:%M}."
         ),
     }
+
+
+@app.post("/api/waitlist")
+def join_waitlist(body: WaitlistIn, conn=Depends(get_conn), now: datetime = Depends(get_now)) -> dict:
+    catalog = flow.load_catalog(conn)
+    if body.service_id not in dict(catalog.services) or (
+        body.professional_id is not None and body.professional_id not in dict(catalog.professionals)
+    ):
+        raise HTTPException(400, "Servicio o profesional inexistente")
+    if not (now.date() <= body.day <= now.date() + timedelta(days=MAX_WAITLIST_DAYS_AHEAD)):
+        raise HTTPException(400, "Elegí un día entre hoy y los próximos 60 días.")
+
+    customer_id = customers.find_by_phone(conn, body.phone) or customers.create(conn, body.customer_name, body.phone)
+    try:
+        _, created = waitlist.add_entry(
+            conn, customer_id, body.service_id, body.professional_id, body.day, body.part_of_day, now
+        )
+    except waitlist.WaitlistFull:
+        raise HTTPException(
+            409, f"Ya estás en {waitlist.MAX_WAITING_PER_CUSTOMER} listas de espera. Esperá a que el negocio te contacte."
+        )
+    label = flow.WaitlistOffer(body.service_id, body.professional_id, body.day, body.part_of_day).label
+    prefix = "Listo, te anotamos" if created else "Ya estabas anotado/a"
+    return {"created": created, "summary": f"{prefix} para el {label}. Si se libera un lugar, el negocio te va a contactar."}
 
 
 @app.get("/")

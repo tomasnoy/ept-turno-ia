@@ -42,6 +42,9 @@
   .secondary { background: transparent; color: var(--accent); border: 0; padding: 12px 8px; min-height: 48px; text-decoration: underline; }
   button:disabled { opacity: .55; cursor: not-allowed; }
   button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .waitlist { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--line); }
+  .waitlist p { margin: 0 0 8px; font-size: .95rem; }
+  .waitlist .option { border-style: dashed; }
   .chips { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 10px; }
   .chips[hidden] { display: none; }
   .chip { border-radius: 999px; padding: 8px 14px; min-height: 40px; font-size: .95rem; }
@@ -126,6 +129,7 @@
       context = data.context;
       const bubble = say(data.reply);
       if (data.options.length) renderOptions(bubble, data.options);
+      if (data.waitlist) renderWaitlistOffer(bubble, data.waitlist, !!data.options.length);
     } catch (err) {
       status.remove();
       say(err.message, "error");
@@ -143,6 +147,47 @@
       box.appendChild(b);
     });
     bubble.appendChild(box);
+  }
+
+  function renderWaitlistOffer(bubble, offer, hasOptions) {
+    const box = el("div", "waitlist");
+    box.appendChild(el("p", "", hasOptions ? "¿No te sirve ninguno?" : "¿Querés que te avisemos si se libera un lugar?"));
+    const b = el("button", "option", `Anotarme en la lista de espera · ${offer.label}`);
+    b.type = "button";
+    b.addEventListener("click", () => { b.disabled = true; askWaitlist(offer); });
+    box.appendChild(b);
+    bubble.appendChild(box);
+  }
+
+  function askWaitlist(offer) {
+    add(el("div", "msg user", `Anotarme en la lista de espera · ${offer.label}`));
+    const bubble = say("Dejame tus datos. Si se libera un lugar, el negocio te va a contactar por teléfono:");
+    const f = el("form", "confirm");
+    f.innerHTML = `
+      <div><label for="wn">Tu nombre</label><input id="wn" name="name" required minlength="2" maxlength="80" autocomplete="name"></div>
+      <div><label for="wp">Tu teléfono (para avisarte)</label><input id="wp" name="phone" type="tel" required minlength="6" maxlength="20" autocomplete="tel"></div>
+      <div class="row"><button class="primary" type="submit">Anotarme</button>
+      <button class="secondary" type="button" id="wback">No, gracias</button></div>`;
+    bubble.appendChild(f);
+    f.querySelector("input").focus();
+    f.querySelector("#wback").addEventListener("click", () => { f.remove(); say("Sin problema. Si querés probar otro día u horario, escribime."); input.focus(); });
+    f.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const submit = f.querySelector("button[type=submit]");
+      submit.disabled = true; submit.textContent = "Anotando…";
+      try {
+        const data = await api("/api/waitlist", {
+          customer_name: f.name.value, phone: f.phone.value,
+          service_id: offer.service_id, professional_id: offer.professional_id,
+          day: offer.day, part_of_day: offer.part_of_day,
+        });
+        f.remove();
+        say(data.summary, "success");
+      } catch (err) {
+        submit.disabled = false; submit.textContent = "Anotarme";
+        say(err.message, "error");
+      }
+    });
   }
 
   function askDetails(opt) {

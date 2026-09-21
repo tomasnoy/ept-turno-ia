@@ -33,7 +33,7 @@ cp .env.example .env                            # y completar lo que corresponda
 - [x] Agente de interpretación de pedidos (`app/agents/interpreter.py`)
 - [x] API y chat de reserva (`app/main.py`, `app/flow.py`, `static/index.html`)
 - [x] Panel del negocio: agenda por día, filtros y cancelación (`/admin`, protegido con clave)
-- [ ] Lista de espera y reacomodo ante cancelaciones
+- [x] Lista de espera y reacomodo ante cancelaciones (`app/waitlist.py`)
 - [x] Despliegue en Render (https://ept-turno-ia.onrender.com)
 
 ## Panel del negocio
@@ -42,6 +42,14 @@ Ruta `/admin`. Muestra las reservas por día, permite filtrar por profesional y 
 Se protege con una clave compartida: hay que definir `ADMIN_TOKEN` en el `.env` del servidor.
 Si no está definida, el panel queda deshabilitado (nunca abierto por omisión). Tras 10 intentos
 fallidos se bloquea temporalmente el acceso.
+
+## Lista de espera y reacomodo
+
+Si el cliente no encuentra lugar (ese día o esa franja), el chat le ofrece anotarse con nombre y
+teléfono. Cuando el negocio cancela un turno, el panel avisa a quién se le puede ofrecer ese lugar
+(por orden de llegada, respetando el día, la franja y el profesional que pidió), le muestra los
+horarios que hoy le sirven y permite asignarle el turno con un clic. La decisión es lógica
+determinista: los datos de los clientes no pasan por el modelo de IA.
 
 ## Producción
 

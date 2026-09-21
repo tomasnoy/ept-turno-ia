@@ -45,10 +45,26 @@ class Context:
 
 
 @dataclass
+class WaitlistOffer:
+    """Lo necesario para anotar al cliente si no hay lugar en lo que pidio."""
+
+    service_id: int
+    professional_id: int | None
+    day: date
+    part_of_day: str
+
+    @property
+    def label(self) -> str:
+        part = f" {PART_NAMES[self.part_of_day]}" if self.part_of_day in PART_NAMES else ""
+        return f"{day_label(self.day)}{part}"
+
+
+@dataclass
 class ChatResult:
     reply: str
     options: list[Option] = field(default_factory=list)
     context: Context = field(default_factory=Context)
+    waitlist: WaitlistOffer | None = None
 
 
 def day_label(day: date) -> str:
@@ -77,7 +93,7 @@ def _matches(start: datetime, part: str, exact: time | None) -> bool:
     return low <= start.time() < high
 
 
-def _options_for_day(
+def options_for_day(
     conn, catalog: Catalog, service_id, professional_id, day, part, exact, now
 ) -> list[Option]:
     professionals = [
@@ -115,18 +131,18 @@ def _spread(options: list[Option]) -> list[Option]:
 
 def find_options(conn, catalog, service_id, professional_id, day, part, exact, now):
     """Devuelve (opciones, nota). Si no hay lugar, relaja la franja y despues busca otros dias."""
-    same_day = _options_for_day(conn, catalog, service_id, professional_id, day, part, exact, now)
+    same_day = options_for_day(conn, catalog, service_id, professional_id, day, part, exact, now)
     if same_day:
         return same_day, ""
     if part != "any":
-        relaxed = _options_for_day(conn, catalog, service_id, professional_id, day, "any", exact, now)
+        relaxed = options_for_day(conn, catalog, service_id, professional_id, day, "any", exact, now)
         if relaxed:
             return relaxed, f"No queda lugar {PART_NAMES[part]}, pero sí en otros horarios."
     for offset in range(1, SEARCH_DAYS + 1):
         later = day + timedelta(days=offset)
-        options = _options_for_day(conn, catalog, service_id, professional_id, later, part, exact, now)
+        options = options_for_day(conn, catalog, service_id, professional_id, later, part, exact, now)
         if not options and part != "any":
-            options = _options_for_day(conn, catalog, service_id, professional_id, later, "any", exact, now)
+            options = options_for_day(conn, catalog, service_id, professional_id, later, "any", exact, now)
         if options:
             return options, f"El {day_label(day)} no hay lugar. El próximo día con turnos es el {day_label(later)}."
     return [], ""
@@ -171,16 +187,20 @@ def handle_message(
     if day is None:
         return ChatResult("¿Para qué día querés el turno?", context=merged)
 
+    part = "any" if intent.exact_time else intent.part_of_day
     options, note = find_options(
         conn, catalog, service_id, professional_id, day, intent.part_of_day, intent.exact_time, now
     )
+    # Si lo pedido no tenia lugar (aunque haya alternativas), se ofrece anotarse en la lista de espera.
+    offer = WaitlistOffer(service_id, professional_id, day, part) if (note or not options) else None
     if not options:
         return ChatResult(
             f"No encontré horarios en los próximos {SEARCH_DAYS} días. "
-            "Probá con otro servicio o profesional.",
+            "Podés anotarte en la lista de espera o probar con otro servicio o profesional.",
             context=merged,
+            waitlist=offer,
         )
     service = next(n for i, n in catalog.services if i == service_id)
     reply = f"{note} " if note else ""
     reply += f"Estos son los horarios disponibles para {service}. Elegí el que prefieras:"
-    return ChatResult(reply.strip(), options, merged)
+    return ChatResult(reply.strip(), options, merged, offer)
