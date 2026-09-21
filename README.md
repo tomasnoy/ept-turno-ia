@@ -19,7 +19,7 @@ propone horarios disponibles.
 
 ```bash
 python -m venv .venv
-.venv/Scripts/pip install -r requirements.txt   # en Linux/Mac: .venv/bin/pip
+.venv/Scripts/pip install -r requirements-dev.txt   # en Linux/Mac: .venv/bin/pip
 cp .env.example .env                            # y completar lo que corresponda
 .venv/Scripts/python -m pytest                  # tests
 .venv/Scripts/uvicorn app.main:app --reload     # servidor
