@@ -30,6 +30,6 @@ cp .env.example .env                            # y completar lo que corresponda
 - [x] Esquema de base de datos y motor de disponibilidad, con tests
 - [x] Capa de proveedores de IA (Ollama / Anthropic)
 - [x] Agente de interpretación de pedidos (`app/agents/interpreter.py`)
-- [ ] API y chat de reserva
+- [x] API y chat de reserva (`app/main.py`, `app/flow.py`, `static/index.html`)
 - [ ] Agente de reacomodo ante cancelaciones
 - [ ] Despliegue

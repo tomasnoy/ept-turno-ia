@@ -13,3 +13,6 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 
 DB_PATH = os.getenv("DB_PATH", "data/turnos.db")
+
+TIMEZONE = os.getenv("TIMEZONE", "America/Argentina/Buenos_Aires")
+BUSINESS_NAME = os.getenv("BUSINESS_NAME", "Peluquería Demo")

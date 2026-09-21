@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Reservá tu turno</title>
+<style>
+  :root {
+    --bg: #f4f1ec; --card: #ffffff; --ink: #1f2933; --muted: #62707e;
+    --accent: #7a3e65; --accent-ink: #ffffff; --bot: #efe7ee; --user: #7a3e65;
+    --line: #ddd5dc; --danger: #b3261e; --ok: #1e7a4c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17141a; --card: #221e26; --ink: #ece7ee; --muted: #a79fab;
+      --accent: #c78ab3; --accent-ink: #1a1220; --bot: #2e2833; --user: #c78ab3;
+      --line: #3b3441; --danger: #f2b8b5; --ok: #7bd1a0;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .app { max-width: 640px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column;
+         padding: 0 16px; }
+  header { padding: 20px 0 8px; }
+  h1 { margin: 0; font-size: 1.35rem; }
+  header p { margin: 4px 0 0; color: var(--muted); font-size: .95rem; }
+  #log { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 12px 0; }
+  .msg { max-width: 88%; padding: 10px 14px; border-radius: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .bot { background: var(--bot); align-self: flex-start; border-bottom-left-radius: 4px; }
+  .user { background: var(--user); color: var(--accent-ink); align-self: flex-end; border-bottom-right-radius: 4px; }
+  .status { color: var(--muted); font-style: italic; }
+  .error { color: var(--danger); }
+  .success { border: 2px solid var(--ok); background: var(--card); }
+  .options { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
+  button { font: inherit; cursor: pointer; }
+  .option, .chip { text-align: left; background: var(--card); color: var(--ink);
+                   border: 1.5px solid var(--accent); border-radius: 12px; padding: 12px 14px; min-height: 48px; }
+  .option:hover, .chip:hover { background: var(--bot); }
+  .primary { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 12px;
+             padding: 12px 18px; min-height: 48px; font-weight: 600; }
+  .secondary { background: transparent; color: var(--accent); border: 0; padding: 12px 8px; min-height: 48px; text-decoration: underline; }
+  button:disabled { opacity: .55; cursor: not-allowed; }
+  button:focus-visible, input:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; padding-bottom: 10px; }
+  .chips[hidden] { display: none; }
+  .chip { border-radius: 999px; padding: 8px 14px; min-height: 40px; font-size: .95rem; }
+  form.confirm { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+  label { font-size: .9rem; color: var(--muted); display: block; margin-bottom: 4px; }
+  input { font: inherit; width: 100%; padding: 12px; border-radius: 10px; border: 1.5px solid var(--line);
+          background: var(--card); color: var(--ink); min-height: 48px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  #composer { position: sticky; bottom: 0; background: var(--bg); padding: 10px 0 16px; display: flex; gap: 8px; }
+  #composer input { flex: 1; }
+  .hint { font-size: .85rem; color: var(--muted); margin: 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1 id="business">Reservá tu turno</h1>
+    <p>Escribí qué necesitás con tus palabras y te muestro los horarios libres.</p>
+  </header>
+
+  <main id="log" aria-live="polite" aria-label="Conversación"></main>
+
+  <div id="chips" class="chips" aria-label="Ejemplos para empezar"></div>
+
+  <form id="composer" autocomplete="off">
+    <input id="text" type="text" maxlength="500" placeholder="Ej: quiero un corte el viernes a la tarde"
+           aria-label="Tu mensaje" required>
+    <button class="primary" id="send" type="submit">Enviar</button>
+  </form>
+</div>
+
+<script>
+  const log = document.getElementById("log");
+  const chips = document.getElementById("chips");
+  const form = document.getElementById("composer");
+  const input = document.getElementById("text");
+  const sendBtn = document.getElementById("send");
+  let context = {};
+  let busy = false;
+
+  function el(tag, cls, text) {
+    const node = document.createElement(tag);
+    if (cls) node.className = cls;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+  function add(node) { log.appendChild(node); node.scrollIntoView({ block: "end", behavior: "smooth" }); return node; }
+  const say = (text, cls = "") => add(el("div", `msg bot ${cls}`.trim(), text));
+
+  function setBusy(value) {
+    busy = value; sendBtn.disabled = value; input.disabled = value;
+    if (!value) input.focus();
+  }
+
+  async function api(path, body) {
+    const resp = await fetch(path, {
+      method: body ? "POST" : "GET",
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    let data = {};
+    try { data = await resp.json(); } catch (_) {}
+    if (!resp.ok) {
+      const detail = Array.isArray(data.detail) ? "Revisá los datos que ingresaste." : data.detail;
+      const err = new Error(detail || "Ocurrió un error. Probá de nuevo.");
+      err.status = resp.status;
+      throw err;
+    }
+    return data;
+  }
+
+  async function send(text) {
+    if (busy || !text.trim()) return;
+    chips.hidden = true;
+    add(el("div", "msg user", text));
+    input.value = "";
+    setBusy(true);
+    const status = say("Buscando horarios…", "status");
+    try {
+      const data = await api("/api/chat", { message: text, context });
+      status.remove();
+      context = data.context;
+      const bubble = say(data.reply);
+      if (data.options.length) renderOptions(bubble, data.options);
+    } catch (err) {
+      status.remove();
+      say(err.message, "error");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function renderOptions(bubble, options) {
+    const box = el("div", "options");
+    options.forEach((opt) => {
+      const b = el("button", "option", opt.label);
+      b.type = "button";
+      b.addEventListener("click", () => { box.querySelectorAll("button").forEach((x) => (x.disabled = true)); askDetails(opt); });
+      box.appendChild(b);
+    });
+    bubble.appendChild(box);
+  }
+
+  function askDetails(opt) {
+    add(el("div", "msg user", opt.label));
+    const bubble = say("Casi listo. Dejame tus datos para confirmar el turno:");
+    const f = el("form", "confirm");
+    f.innerHTML = `
+      <div><label for="cn">Tu nombre</label><input id="cn" name="name" required minlength="2" maxlength="80" autocomplete="name"></div>
+      <div><label for="cp">Teléfono (opcional, para reconocerte la próxima vez)</label><input id="cp" name="phone" type="tel" maxlength="20" autocomplete="tel"></div>
+      <div class="row"><button class="primary" type="submit">Confirmar turno</button>
+      <button class="secondary" type="button" id="back">Elegir otro horario</button></div>`;
+    bubble.appendChild(f);
+    f.querySelector("input").focus();
+    f.querySelector("#back").addEventListener("click", () => {
+      f.remove();
+      say("Sin problema. Escribime otro día u horario y te muestro más opciones.");
+      input.focus();
+    });
+    f.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const submit = f.querySelector("button[type=submit]");
+      submit.disabled = true; submit.textContent = "Confirmando…";
+      try {
+        const data = await api("/api/book", {
+          customer_name: f.name.value, phone: f.phone.value || null,
+          professional_id: opt.professional_id, service_id: context.service_id, start: opt.start,
+        });
+        f.remove();
+        context = {};
+        const done = say(data.summary + "\n¡Te esperamos!", "success");
+        const again = el("button", "secondary", "Reservar otro turno");
+        again.type = "button";
+        again.addEventListener("click", () => { again.remove(); say("¿Qué otro turno querés reservar?"); input.focus(); });
+        done.appendChild(again);
+      } catch (err) {
+        submit.disabled = false; submit.textContent = "Confirmar turno";
+        say(err.message, "error");
+        if (err.status === 409) { f.remove(); say("Escribime de nuevo el día que querés y te muestro horarios actualizados."); }
+      }
+    });
+  }
+
+  form.addEventListener("submit", (e) => { e.preventDefault(); send(input.value); });
+
+  ["Quiero un corte mañana a la tarde", "Necesito una tintura el viernes", "Un peinado el sábado a las 10"].forEach((t) => {
+    const c = el("button", "chip", t);
+    c.type = "button";
+    c.addEventListener("click", () => send(t));
+    chips.appendChild(c);
+  });
+
+  api("/api/business").then((b) => {
+    document.getElementById("business").textContent = b.name;
+    document.title = `Reservá tu turno · ${b.name}`;
+    say(`¡Hola! Soy el asistente de ${b.name}. Contame qué servicio querés y para cuándo.`);
+  }).catch(() => say("No pude conectarme con el servidor. Recargá la página en unos segundos.", "error"));
+</script>
+</body>
+</html>

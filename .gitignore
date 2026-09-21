@@ -9,3 +9,6 @@ __pycache__/
 
 # Datos locales
 data/*.db
+
+# Configuracion local del editor
+.claude/
