@@ -33,7 +33,7 @@ cp .env.example .env                            # y completar lo que corresponda
 - [x] API y chat de reserva (`app/main.py`, `app/flow.py`, `static/index.html`)
 - [x] Panel del negocio: agenda por día, filtros y cancelación (`/admin`, protegido con clave)
 - [ ] Lista de espera y reacomodo ante cancelaciones
-- [ ] Despliegue
+- [x] Despliegue en Render (https://ept-turno-ia.onrender.com)
 
 ## Panel del negocio
 
@@ -41,3 +41,14 @@ Ruta `/admin`. Muestra las reservas por día, permite filtrar por profesional y 
 Se protege con una clave compartida: hay que definir `ADMIN_TOKEN` en el `.env` del servidor.
 Si no está definida, el panel queda deshabilitado (nunca abierto por omisión). Tras 10 intentos
 fallidos se bloquea temporalmente el acceso.
+
+## Producción
+
+- Aplicación: https://ept-turno-ia.onrender.com (chat de reserva) y `/admin` (panel del negocio)
+- Hosting: Render, plan gratuito, región Virginia. Despliegue automático en cada push a `main`.
+- Variables de entorno en Render: `LLM_PROVIDER=anthropic`, `TIMEZONE`, `BUSINESS_NAME`,
+  `FORWARDED_ALLOW_IPS=*` (detrás del proxy de Render, para identificar a cada visitante), y los
+  secretos `ANTHROPIC_API_KEY` y `ADMIN_TOKEN`, cargados solo en el panel de Render.
+- Limitaciones del plan gratuito: la app se duerme tras unos minutos sin uso (la primera visita
+  tarda en despertar) y el disco es efímero, por lo que la base SQLite se recrea con datos de
+  ejemplo en cada reinicio o despliegue.
