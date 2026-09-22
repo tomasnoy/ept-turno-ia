@@ -29,7 +29,7 @@ def _busy_intervals(conn: sqlite3.Connection, professional_id: int, day: date):
     day_start = datetime(day.year, day.month, day.day)
     rows = conn.execute(
         """SELECT start, end FROM appointments
-           WHERE professional_id = ? AND status = 'confirmed' AND start < ? AND end > ?""",
+           WHERE professional_id = ? AND status IN ('confirmed', 'pending') AND start < ? AND end > ?""",
         (professional_id, (day_start + timedelta(days=1)).isoformat(), day_start.isoformat()),
     ).fetchall()
     return [(datetime.fromisoformat(r["start"]), datetime.fromisoformat(r["end"])) for r in rows]
@@ -69,18 +69,29 @@ def book(
     professional_id: int,
     service_id: int,
     start: datetime,
+    status: str = "pending",
 ) -> int:
-    """Crea el turno si el horario esta libre. Devuelve el id del turno."""
+    """Crea el turno si el horario esta libre. Devuelve el id del turno.
+
+    Nace en estado `status` (pendiente por defecto): el negocio lo confirma o cancela desde el
+    panel. Las asignaciones que hace el propio negocio (ej. lista de espera) pueden nacer
+    confirmadas directamente pasando status="confirmed".
+    """
     if start not in free_slots(conn, professional_id, service_id, start.date()):
         raise SlotUnavailable(f"{start.isoformat()} no esta disponible")
     end = start + timedelta(minutes=_service_duration(conn, service_id))
     cur = conn.execute(
-        """INSERT INTO appointments (customer_id, professional_id, service_id, start, end)
-           VALUES (?, ?, ?, ?, ?)""",
-        (customer_id, professional_id, service_id, start.isoformat(), end.isoformat()),
+        """INSERT INTO appointments (customer_id, professional_id, service_id, start, end, status)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (customer_id, professional_id, service_id, start.isoformat(), end.isoformat(), status),
     )
     conn.commit()
     return cur.lastrowid
+
+
+def confirm(conn: sqlite3.Connection, appointment_id: int) -> None:
+    conn.execute("UPDATE appointments SET status = 'confirmed' WHERE id = ?", (appointment_id,))
+    conn.commit()
 
 
 def cancel(conn: sqlite3.Connection, appointment_id: int) -> None:

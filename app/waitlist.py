@@ -133,7 +133,9 @@ def fulfill(conn: sqlite3.Connection, entry_id: int, professional_id: int, start
         raise scheduling.SlotUnavailable("El cliente pidio otro profesional")
     if start.date().isoformat() != entry["day"]:
         raise scheduling.SlotUnavailable("El cliente esta anotado para otro dia")
-    appointment_id = scheduling.book(conn, entry["customer_id"], professional_id, entry["service_id"], start)
+    appointment_id = scheduling.book(
+        conn, entry["customer_id"], professional_id, entry["service_id"], start, status="confirmed"
+    )
     conn.execute("UPDATE waitlist SET status = 'fulfilled' WHERE id = ?", (entry_id,))
     conn.commit()
     return appointment_id

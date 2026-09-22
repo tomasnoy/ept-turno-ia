@@ -56,8 +56,11 @@ class Intent:
 
 
 def load_catalog(conn: sqlite3.Connection) -> Catalog:
-    services = [(r["id"], r["name"]) for r in conn.execute("SELECT id, name FROM services")]
-    professionals = [(r["id"], r["name"]) for r in conn.execute("SELECT id, name FROM professionals")]
+    """Solo lo activo se ofrece a los clientes; lo desactivado sigue existiendo por los turnos ya tomados."""
+    services = [(r["id"], r["name"]) for r in conn.execute("SELECT id, name FROM services WHERE active = 1")]
+    professionals = [
+        (r["id"], r["name"]) for r in conn.execute("SELECT id, name FROM professionals WHERE active = 1")
+    ]
     return Catalog(services, professionals)
 
 

@@ -89,6 +89,34 @@
   .offer { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 10px; padding: 8px 14px; min-height: 44px; font-weight: 600; }
   .card.hot { border-color: var(--ok); box-shadow: 0 0 0 2px var(--ok) inset; }
   .updated { font-size: .82rem; color: var(--muted); margin-top: 14px; text-align: right; }
+  .badge.warn { background: #e8a23d; color: #241a06; }
+  .card.pending { box-shadow: 0 0 0 2px #e8a23d inset; }
+  .ok-btn { background: var(--ok); color: var(--bg); border: 0; border-radius: 10px; padding: 8px 14px; min-height: 44px; font-weight: 600; }
+
+  /* Tabs Agenda / Configuracion */
+  .tabs { display: flex; gap: 6px; margin: 4px 0 16px; border-bottom: 1px solid var(--line); }
+  .tab { background: none; border: 0; border-bottom: 3px solid transparent; color: var(--muted); padding: 10px 4px; min-height: 44px; font-weight: 600; }
+  .tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+
+  /* Configuracion */
+  .config-section { margin-bottom: 30px; }
+  .config-section h2 { font-size: 1.1rem; margin: 0 0 4px; }
+  .config-section > p { color: var(--muted); margin: 0 0 12px; font-size: .92rem; }
+  .config-form { display: flex; flex-direction: column; gap: 10px; max-width: 480px; }
+  .config-form label { margin-top: 4px; }
+  table.catalog { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+  table.catalog th, table.catalog td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); font-size: .95rem; }
+  table.catalog input[type=text], table.catalog input[type=number] { min-height: 40px; padding: 8px; width: 100%; }
+  table.catalog input[type=checkbox] { width: 20px; height: 20px; min-height: 0; }
+  .catalog-add { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; }
+  .catalog-add > div { display: flex; flex-direction: column; gap: 4px; }
+  .catalog-add label { font-size: .85rem; color: var(--muted); }
+  .pro-picker { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .pro-chip { background: var(--card); border: 1.5px solid var(--line); border-radius: 999px; padding: 8px 16px; min-height: 40px; color: var(--ink); }
+  .pro-chip[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .hours-day { display: grid; grid-template-columns: 90px 1fr auto; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .hours-day input[type=text] { min-height: 40px; }
+  .hint { color: var(--muted); font-size: .85rem; margin: 2px 0 0; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -111,31 +139,85 @@
     <button class="ghost" id="logout" type="button">Salir</button>
   </header>
 
-  <nav class="strip" id="strip" aria-label="Próximos días"></nav>
+  <div class="tabs" role="tablist">
+    <button class="tab" id="tabAgenda" type="button" role="tab" aria-selected="true">Agenda</button>
+    <button class="tab" id="tabConfig" type="button" role="tab" aria-selected="false">Configuración</button>
+  </div>
 
-  <div class="bar">
-    <h2 id="dayTitle"></h2>
-    <div class="nav">
-      <button class="ghost" id="prev" type="button" aria-label="Día anterior">‹</button>
-      <button class="ghost" id="today" type="button">Hoy</button>
-      <button class="ghost" id="next" type="button" aria-label="Día siguiente">›</button>
+  <section id="agendaView">
+    <nav class="strip" id="strip" aria-label="Próximos días"></nav>
+
+    <div class="bar">
+      <h2 id="dayTitle"></h2>
+      <div class="nav">
+        <button class="ghost" id="prev" type="button" aria-label="Día anterior">‹</button>
+        <button class="ghost" id="today" type="button">Hoy</button>
+        <button class="ghost" id="next" type="button" aria-label="Día siguiente">›</button>
+      </div>
     </div>
-  </div>
 
-  <div class="filters">
-    <select id="pro" aria-label="Filtrar por profesional"><option value="">Todos los profesionales</option></select>
-    <label><input type="checkbox" id="showCancelled"> Mostrar cancelados</label>
-    <button class="link" id="goWait" type="button">Lista de espera</button>
-  </div>
+    <div class="filters">
+      <select id="pro" aria-label="Filtrar por profesional"><option value="">Todos los profesionales</option></select>
+      <label><input type="checkbox" id="showCancelled"> Mostrar cancelados</label>
+      <button class="link" id="goWait" type="button">Lista de espera</button>
+    </div>
 
-  <p class="summary" id="summary" aria-live="polite"></p>
-  <ul class="list" id="list"></ul>
-  <section class="wait" id="waitSection" aria-labelledby="waitTitle">
-    <h2 id="waitTitle">Lista de espera <span id="waitCount"></span></h2>
-    <p>Clientes que no encontraron lugar. Se ordenan por llegada: ofrecé primero al que lleva más tiempo esperando.</p>
-    <ul class="list" id="waitList"></ul>
+    <p class="summary" id="summary" aria-live="polite"></p>
+    <ul class="list" id="list"></ul>
+    <section class="wait" id="waitSection" aria-labelledby="waitTitle">
+      <h2 id="waitTitle">Lista de espera <span id="waitCount"></span></h2>
+      <p>Clientes que no encontraron lugar. Se ordenan por llegada: ofrecé primero al que lleva más tiempo esperando.</p>
+      <ul class="list" id="waitList"></ul>
+    </section>
+    <p class="updated" id="updated"></p>
   </section>
-  <p class="updated" id="updated"></p>
+
+  <section id="configView" hidden>
+    <div class="config-section">
+      <h2>Datos del negocio</h2>
+      <p>Nombre y mensaje de bienvenida que ve el cliente al abrir el chat.</p>
+      <form class="config-form" id="settingsForm">
+        <div><label for="cfgName">Nombre del negocio</label><input id="cfgName" type="text" maxlength="80" required></div>
+        <div><label for="cfgWelcome">Mensaje de bienvenida</label><input id="cfgWelcome" type="text" maxlength="300" required></div>
+        <div><button class="primary" type="submit">Guardar</button></div>
+      </form>
+    </div>
+
+    <div class="config-section">
+      <h2>Servicios</h2>
+      <p>Los que estén desactivados no se ofrecen en el chat, pero sus turnos ya tomados se conservan.</p>
+      <table class="catalog" id="servicesTable">
+        <thead><tr><th>Nombre</th><th>Duración (min)</th><th>Activo</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <form class="catalog-add" id="serviceAddForm">
+        <div><label for="newServiceName">Nuevo servicio</label><input id="newServiceName" type="text" minlength="2" maxlength="80" required></div>
+        <div><label for="newServiceDuration">Duración (min)</label><input id="newServiceDuration" type="number" min="5" max="480" value="30" required></div>
+        <button class="ghost" type="submit">+ Agregar servicio</button>
+      </form>
+    </div>
+
+    <div class="config-section">
+      <h2>Profesionales</h2>
+      <p>Los que estén desactivados no aparecen para reservar en el chat.</p>
+      <table class="catalog" id="professionalsTable">
+        <thead><tr><th>Nombre</th><th>Activo</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <form class="catalog-add" id="professionalAddForm">
+        <div><label for="newProName">Nuevo profesional</label><input id="newProName" type="text" minlength="2" maxlength="80" required></div>
+        <button class="ghost" type="submit">+ Agregar profesional</button>
+      </form>
+    </div>
+
+    <div class="config-section">
+      <h2>Horario de atención</h2>
+      <p>Elegí un profesional y para cada día escribí los rangos horarios separados por coma, ej. <code>09:00-13:00, 15:00-19:00</code>. Dejalo vacío si ese día no atiende.</p>
+      <div class="pro-picker" id="hoursProPicker"></div>
+      <div id="hoursDays"></div>
+      <p class="hint" id="hoursHint"></p>
+    </div>
+  </section>
 </div>
 <div class="toast" id="toast" role="status" hidden></div>
 
@@ -215,12 +297,15 @@
     sel.value = current;
 
     const showCancelled = $("showCancelled").checked;
-    const shown = data.appointments.filter((a) => (showCancelled || a.status === "confirmed") && (!sel.value || a.professional === sel.value));
+    const shown = data.appointments.filter((a) => (showCancelled || a.status !== "cancelled") && (!sel.value || a.professional === sel.value));
     const confirmed = data.appointments.filter((a) => a.status === "confirmed").length;
-    const cancelled = data.appointments.length - confirmed;
-    $("summary").textContent = confirmed
-      ? `${confirmed} ${confirmed === 1 ? "turno confirmado" : "turnos confirmados"}` + (cancelled ? ` · ${cancelled} cancelado${cancelled === 1 ? "" : "s"}` : "")
-      : "No hay turnos confirmados para este día.";
+    const pending = data.appointments.filter((a) => a.status === "pending").length;
+    const cancelled = data.appointments.length - confirmed - pending;
+    const parts = [];
+    if (confirmed) parts.push(`${confirmed} ${confirmed === 1 ? "turno confirmado" : "turnos confirmados"}`);
+    if (pending) parts.push(`${pending} ${pending === 1 ? "pendiente" : "pendientes"}`);
+    if (cancelled) parts.push(`${cancelled} cancelado${cancelled === 1 ? "" : "s"}`);
+    $("summary").textContent = parts.length ? parts.join(" · ") : "Todavía no hay reservas para este día.";
 
     const list = $("list"); list.replaceChildren();
     if (!shown.length) {
@@ -232,12 +317,13 @@
   }
 
   function card(a) {
-    const li = el("li", "card" + (a.status === "cancelled" ? " cancelled" : ""));
+    const li = el("li", "card" + (a.status === "cancelled" ? " cancelled" : a.status === "pending" ? " pending" : ""));
     const time = el("div", "time", hhmm(a.start));
     time.appendChild(el("small", "", "hasta " + hhmm(a.end)));
     const info = el("div");
     const who = el("div", "who", a.customer);
     if (a.status === "cancelled") who.appendChild(el("span", "badge", "Cancelado"));
+    if (a.status === "pending") who.appendChild(el("span", "badge warn", "Pendiente"));
     const meta = el("div", "meta", `${a.service} · con ${a.professional}`);
     info.append(who, meta);
     if (a.phone) {
@@ -246,7 +332,7 @@
       phone.append("Tel: ", link); info.appendChild(phone);
     }
     li.append(time, info);
-    if (a.status === "confirmed") li.appendChild(cancelControls(a));
+    if (a.status !== "cancelled") li.appendChild(appointmentControls(a));
     return li;
   }
 
@@ -267,8 +353,18 @@
     box.append(yes, no);
   }
 
-  function cancelControls(a) {
+  function appointmentControls(a) {
     const box = el("div", "actions");
+    if (a.status === "pending") {
+      const confirmBtn = el("button", "ok-btn", "Confirmar turno"); confirmBtn.type = "button";
+      confirmBtn.addEventListener("click", async () => {
+        confirmBtn.disabled = true;
+        try { await api(`/api/admin/appointments/${a.id}/confirm`, "POST"); toast("Turno confirmado."); }
+        catch (err) { toast(err.message); }
+        load(day);
+      });
+      box.appendChild(confirmBtn);
+    }
     const start = el("button", "link", "Cancelar turno"); start.type = "button";
     start.addEventListener("click", () => confirmStep(box, "¿Cancelar este turno?", "Sí, cancelar", "danger", async () => {
       const r = await api(`/api/admin/appointments/${a.id}/cancel`, "POST");
@@ -340,6 +436,191 @@
     load(d.toISOString().slice(0, 10));
   }
 
+  // --- Configuracion: interfaz, servicios, profesionales, horarios ------------------------------
+
+  let configLoaded = false;
+  let hoursData = null, currentHoursPro = null;
+  const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
+
+  function switchTab(name) {
+    const agenda = name === "agenda";
+    $("tabAgenda").setAttribute("aria-selected", String(agenda));
+    $("tabConfig").setAttribute("aria-selected", String(!agenda));
+    $("agendaView").hidden = !agenda;
+    $("configView").hidden = agenda;
+    if (!agenda && !configLoaded) loadConfig();
+  }
+
+  async function loadConfig() {
+    configLoaded = true;
+    try {
+      const [s, services, professionals, hours] = await Promise.all([
+        api("/api/admin/settings"),
+        api("/api/admin/services"),
+        api("/api/admin/professionals"),
+        api("/api/admin/working-hours"),
+      ]);
+      $("cfgName").value = s.business_name;
+      $("cfgWelcome").value = s.welcome_message;
+      renderServices(services.services);
+      renderProfessionals(professionals.professionals);
+      hoursData = hours;
+      renderHoursPicker();
+    } catch (err) {
+      toast(err.message);
+    }
+  }
+
+  $("settingsForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await api("/api/admin/settings", "PUT", { business_name: $("cfgName").value, welcome_message: $("cfgWelcome").value });
+      toast("Datos del negocio guardados.");
+      refreshBusinessName();
+    } catch (err) { toast(err.message); }
+  });
+
+  function renderServices(services) {
+    const tbody = $("servicesTable").querySelector("tbody");
+    tbody.replaceChildren();
+    services.forEach((svc) => {
+      const tr = el("tr");
+      const tdName = el("td"); const name = el("input"); name.type = "text"; name.value = svc.name; name.minLength = 2; name.maxLength = 80;
+      tdName.appendChild(name);
+      const tdDur = el("td"); const dur = el("input"); dur.type = "number"; dur.min = 5; dur.max = 480; dur.value = svc.duration_min;
+      tdDur.appendChild(dur);
+      const tdActive = el("td"); const active = el("input"); active.type = "checkbox"; active.checked = svc.active;
+      tdActive.appendChild(active);
+      const tdSave = el("td"); const save = el("button", "ghost", "Guardar"); save.type = "button";
+      save.addEventListener("click", async () => {
+        save.disabled = true;
+        try {
+          await api(`/api/admin/services/${svc.id}`, "PUT", { name: name.value, duration_min: Number(dur.value), active: active.checked });
+          toast("Servicio actualizado.");
+        } catch (err) { toast(err.message); }
+        save.disabled = false;
+      });
+      tdSave.appendChild(save);
+      tr.append(tdName, tdDur, tdActive, tdSave);
+      tbody.appendChild(tr);
+    });
+  }
+
+  $("serviceAddForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await api("/api/admin/services", "POST", { name: $("newServiceName").value, duration_min: Number($("newServiceDuration").value) });
+      $("serviceAddForm").reset(); $("newServiceDuration").value = 30;
+      renderServices((await api("/api/admin/services")).services);
+      toast("Servicio agregado.");
+    } catch (err) { toast(err.message); }
+  });
+
+  function renderProfessionals(professionals) {
+    const tbody = $("professionalsTable").querySelector("tbody");
+    tbody.replaceChildren();
+    professionals.forEach((pro) => {
+      const tr = el("tr");
+      const tdName = el("td"); const name = el("input"); name.type = "text"; name.value = pro.name; name.minLength = 2; name.maxLength = 80;
+      tdName.appendChild(name);
+      const tdActive = el("td"); const active = el("input"); active.type = "checkbox"; active.checked = pro.active;
+      tdActive.appendChild(active);
+      const tdSave = el("td"); const save = el("button", "ghost", "Guardar"); save.type = "button";
+      save.addEventListener("click", async () => {
+        save.disabled = true;
+        try {
+          await api(`/api/admin/professionals/${pro.id}`, "PUT", { name: name.value, active: active.checked });
+          toast("Profesional actualizado.");
+          hoursData = await api("/api/admin/working-hours");
+          renderHoursPicker();
+        } catch (err) { toast(err.message); }
+        save.disabled = false;
+      });
+      tdSave.appendChild(save);
+      tr.append(tdName, tdActive, tdSave);
+      tbody.appendChild(tr);
+    });
+  }
+
+  $("professionalAddForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    try {
+      await api("/api/admin/professionals", "POST", { name: $("newProName").value });
+      $("professionalAddForm").reset();
+      renderProfessionals((await api("/api/admin/professionals")).professionals);
+      hoursData = await api("/api/admin/working-hours");
+      renderHoursPicker();
+      toast("Profesional agregado.");
+    } catch (err) { toast(err.message); }
+  });
+
+  function renderHoursPicker() {
+    const box = $("hoursProPicker"); box.replaceChildren();
+    if (!hoursData.professionals.length) { box.appendChild(el("p", "hint", "Todavía no hay profesionales.")); return; }
+    if (!currentHoursPro || !hoursData.professionals.some((p) => p.id === currentHoursPro)) {
+      currentHoursPro = hoursData.professionals[0].id;
+    }
+    hoursData.professionals.forEach((p) => {
+      const b = el("button", "pro-chip", p.name + (p.active ? "" : " (inactivo)")); b.type = "button";
+      if (p.id === currentHoursPro) b.setAttribute("aria-current", "true");
+      b.addEventListener("click", () => { currentHoursPro = p.id; renderHoursPicker(); renderHoursDays(); });
+      box.appendChild(b);
+    });
+    renderHoursDays();
+  }
+
+  function parseRanges(text) {
+    const trimmed = text.trim();
+    if (!trimmed) return [];
+    return trimmed.split(",").map((part) => {
+      const m = part.trim().match(/^(\d{2}:\d{2})\s*-\s*(\d{2}:\d{2})$/);
+      if (!m) throw new Error(`Formato inválido: "${part.trim()}". Usá HH:MM-HH:MM separados por coma.`);
+      return { start: m[1], end: m[2] };
+    });
+  }
+  const formatRanges = (ranges) => ranges.map((r) => `${r.start}-${r.end}`).join(", ");
+
+  function renderHoursDays() {
+    $("hoursHint").textContent = "";
+    const box = $("hoursDays"); box.replaceChildren();
+    DIAS.forEach((label, weekday) => {
+      const ranges = hoursData.hours.filter((h) => h.professional_id === currentHoursPro && h.weekday === weekday);
+      const row = el("div", "hours-day");
+      row.appendChild(el("span", "", label));
+      const input = el("input"); input.type = "text"; input.value = formatRanges(ranges);
+      input.placeholder = "cerrado";
+      row.appendChild(input);
+      const save = el("button", "ghost", "Guardar"); save.type = "button";
+      save.addEventListener("click", async () => {
+        let parsed;
+        try { parsed = parseRanges(input.value); }
+        catch (err) { $("hoursHint").textContent = err.message; return; }
+        save.disabled = true;
+        try {
+          await api("/api/admin/working-hours", "PUT", { professional_id: currentHoursPro, weekday, ranges: parsed });
+          hoursData.hours = hoursData.hours.filter((h) => !(h.professional_id === currentHoursPro && h.weekday === weekday));
+          parsed.forEach((r) => hoursData.hours.push({ professional_id: currentHoursPro, weekday, start: r.start, end: r.end }));
+          toast(`Horario del ${label.toLowerCase()} guardado.`);
+        } catch (err) {
+          $("hoursHint").textContent = err.message;
+        }
+        save.disabled = false;
+      });
+      row.appendChild(save);
+      box.appendChild(row);
+    });
+  }
+
+  async function refreshBusinessName() {
+    try {
+      const b = await fetch("/api/business").then((r) => r.json());
+      $("business").firstChild.textContent = b.name; document.title = `Panel · ${b.name}`;
+    } catch (_) {}
+  }
+
+  $("tabAgenda").addEventListener("click", () => switchTab("agenda"));
+  $("tabConfig").addEventListener("click", () => switchTab("config"));
+
   $("loginForm").addEventListener("submit", async (e) => {
     e.preventDefault(); key = $("key").value; $("loginError").textContent = "";
     try { await api("/api/admin/check"); store.set(key); start(); }
@@ -359,9 +640,7 @@
     timer = setInterval(() => { if (!document.hidden && day && !document.querySelector('[data-confirming]')) load(day); }, 60000);  // nuevas reservas sin recargar
   }
 
-  fetch("/api/business").then((r) => r.json()).then((b) => {
-    $("business").firstChild.textContent = b.name; document.title = `Panel · ${b.name}`;
-  }).catch(() => {});
+  refreshBusinessName();
 
   if (key) start(); else showLogin();
 </script>

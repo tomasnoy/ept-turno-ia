@@ -338,7 +338,7 @@
   api("/api/business").then((b) => {
     document.getElementById("business").textContent = b.name;
     document.title = `Reservá tu turno · ${b.name}`;
-    say(`¡Hola! Soy el asistente de ${b.name}. Contame qué servicio querés y para cuándo.`);
+    say(b.welcome_message);
   }).catch(() => say("No pude conectarme con el servidor. Recargá la página en unos segundos.", "error"));
 </script>
 </body>

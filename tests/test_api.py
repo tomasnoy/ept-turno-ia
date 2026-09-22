@@ -97,10 +97,10 @@ def reservar(client, **overrides):
     return client.post("/api/book", json=body)
 
 
-def test_reserva_confirma_y_bloquea_el_horario(client):
+def test_reserva_queda_pendiente_y_bloquea_el_horario(client):
     resp = reservar(client)
     assert resp.status_code == 200
-    assert "Turno confirmado" in resp.json()["summary"]
+    assert "pendiente" in resp.json()["summary"]
     assert reservar(client, customer_name="Otra Persona", phone="11 4444-0000").status_code == 409
 
 

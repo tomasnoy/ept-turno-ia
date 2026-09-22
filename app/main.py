@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from app import admin, config, customers, db, flow, scheduling, seed, waitlist
+from app import admin, config, customers, db, flow, scheduling, seed, settings, waitlist
 from app.deps import get_conn, get_llm, get_now
 from app.llm.base import LLMError, LLMProvider
 
@@ -97,8 +97,10 @@ def health() -> dict:
 @app.get("/api/business")
 def business(conn=Depends(get_conn)) -> dict:
     catalog = flow.load_catalog(conn)
+    s = settings.get_all(conn)
     return {
-        "name": config.BUSINESS_NAME,
+        "name": s["business_name"],
+        "welcome_message": s["welcome_message"],
         "services": [{"id": i, "name": n} for i, n in catalog.services],
         "professionals": [{"id": i, "name": n} for i, n in catalog.professionals],
     }
@@ -198,8 +200,9 @@ def book(body: BookIn, conn=Depends(get_conn)) -> dict:
     return {
         "appointment_id": appointment_id,
         "summary": (
-            f"Turno confirmado: {services[body.service_id]} con {professionals[body.professional_id]}, "
-            f"{flow.day_label(body.start.date())} a las {body.start:%H:%M}."
+            f"Turno reservado: {services[body.service_id]} con {professionals[body.professional_id]}, "
+            f"{flow.day_label(body.start.date())} a las {body.start:%H:%M}. "
+            "Queda pendiente hasta que el negocio lo confirme."
         ),
     }
 

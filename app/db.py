@@ -6,12 +6,20 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS services (
     id INTEGER PRIMARY KEY,
     name TEXT NOT NULL,
-    duration_min INTEGER NOT NULL
+    duration_min INTEGER NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS professionals (
     id INTEGER PRIMARY KEY,
-    name TEXT NOT NULL
+    name TEXT NOT NULL,
+    active INTEGER NOT NULL DEFAULT 1
+);
+
+-- configuracion editable del negocio (nombre, mensaje de bienvenida, etc.)
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
 );
 
 -- weekday: 0 = lunes ... 6 = domingo. Varias filas por dia permiten cortes (ej. siesta).
@@ -28,7 +36,7 @@ CREATE TABLE IF NOT EXISTS customers (
     phone TEXT
 );
 
--- status: confirmed | cancelled
+-- status: pending | confirmed | cancelled. Los turnos nacen pendientes hasta que el negocio los confirma.
 CREATE TABLE IF NOT EXISTS appointments (
     id INTEGER PRIMARY KEY,
     customer_id INTEGER NOT NULL REFERENCES customers(id),
@@ -36,7 +44,7 @@ CREATE TABLE IF NOT EXISTS appointments (
     service_id INTEGER NOT NULL REFERENCES services(id),
     start TEXT NOT NULL,
     end TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'confirmed'
+    status TEXT NOT NULL DEFAULT 'pending'
 );
 
 -- status: waiting | fulfilled | removed. part_of_day: any | morning | afternoon | evening
@@ -66,7 +74,9 @@ MIGRATIONS = {
         "part_of_day": "TEXT NOT NULL DEFAULT 'any'",
         "status": "TEXT NOT NULL DEFAULT 'waiting'",
         "created_at": "TEXT NOT NULL DEFAULT ''",
-    }
+    },
+    "services": {"active": "INTEGER NOT NULL DEFAULT 1"},
+    "professionals": {"active": "INTEGER NOT NULL DEFAULT 1"},
 }
 
 
