@@ -16,6 +16,7 @@ from app.llm.base import LLMProvider
 MAX_OPTIONS = 6
 MIN_OPTION_GAP = timedelta(minutes=30)
 SEARCH_DAYS = 7
+CALENDAR_DAYS = 14
 PART_RANGES = {
     "morning": (time(0, 0), time(13, 0)),
     "afternoon": (time(13, 0), time(20, 0)),
@@ -65,6 +66,9 @@ class ChatResult:
     options: list[Option] = field(default_factory=list)
     context: Context = field(default_factory=Context)
     waitlist: WaitlistOffer | None = None
+    calendar_days: list[date] = field(default_factory=list)
+    selected_day: date | None = None
+    selected_time: str | None = None
 
 
 def day_label(day: date) -> str:
@@ -129,6 +133,18 @@ def _spread(options: list[Option]) -> list[Option]:
     return [spaced[round(i * last / (MAX_OPTIONS - 1))] for i in range(MAX_OPTIONS)]
 
 
+def available_days(
+    conn, catalog, service_id, professional_id, start, now, days=CALENDAR_DAYS
+) -> list[date]:
+    """Dias, a partir de start, con al menos un horario libre. Para pintar el calendario."""
+    found = []
+    for offset in range(days):
+        day = start + timedelta(days=offset)
+        if options_for_day(conn, catalog, service_id, professional_id, day, "any", None, now):
+            found.append(day)
+    return found
+
+
 def find_options(conn, catalog, service_id, professional_id, day, part, exact, now):
     """Devuelve (opciones, nota). Si no hay lugar, relaja la franja y despues busca otros dias."""
     same_day = options_for_day(conn, catalog, service_id, professional_id, day, part, exact, now)
@@ -185,22 +201,39 @@ def handle_message(
         servicios = ", ".join(name for _, name in catalog.services)
         return ChatResult(f"¿Qué servicio querés reservar? Tenemos: {servicios}.", context=merged)
     if day is None:
-        return ChatResult("¿Para qué día querés el turno?", context=merged)
+        days = available_days(conn, catalog, service_id, professional_id, today, now)
+        return ChatResult(
+            "Elegí un día en el calendario para ver los horarios disponibles.",
+            context=merged,
+            calendar_days=days,
+        )
 
     part = "any" if intent.exact_time else intent.part_of_day
     options, note = find_options(
         conn, catalog, service_id, professional_id, day, intent.part_of_day, intent.exact_time, now
     )
+    calendar_days = available_days(conn, catalog, service_id, professional_id, day, now)
+    selected_time = intent.exact_time.strftime("%H:%M") if intent.exact_time else None
     # Si lo pedido no tenia lugar (aunque haya alternativas), se ofrece anotarse en la lista de espera.
     offer = WaitlistOffer(service_id, professional_id, day, part) if (note or not options) else None
     if not options:
         return ChatResult(
             f"No encontré horarios en los próximos {SEARCH_DAYS} días. "
-            "Podés anotarte en la lista de espera o probar con otro servicio o profesional.",
+            "Podés anotarte en la lista de espera o elegir otro día en el calendario.",
             context=merged,
             waitlist=offer,
+            calendar_days=calendar_days,
         )
     service = next(n for i, n in catalog.services if i == service_id)
     reply = f"{note} " if note else ""
     reply += f"Estos son los horarios disponibles para {service}. Elegí el que prefieras:"
-    return ChatResult(reply.strip(), options, merged, offer)
+    selected_day = options[0].start.date()
+    return ChatResult(
+        reply.strip(),
+        options,
+        merged,
+        offer,
+        calendar_days=calendar_days,
+        selected_day=selected_day,
+        selected_time=selected_time,
+    )

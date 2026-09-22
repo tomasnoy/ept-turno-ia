@@ -141,6 +141,37 @@ def chat(
             "professional_id": result.context.professional_id,
             "day": result.context.day.isoformat() if result.context.day else None,
         },
+        "calendar_days": [d.isoformat() for d in result.calendar_days],
+        "selected_day": result.selected_day.isoformat() if result.selected_day else None,
+        "selected_time": result.selected_time,
+    }
+
+
+@app.get("/api/slots")
+def slots(
+    service_id: int,
+    day: date,
+    professional_id: int | None = None,
+    conn=Depends(get_conn),
+    now: datetime = Depends(get_now),
+) -> dict:
+    catalog = flow.load_catalog(conn)
+    if service_id not in dict(catalog.services):
+        raise HTTPException(400, "Servicio inexistente")
+    if professional_id is not None and professional_id not in dict(catalog.professionals):
+        raise HTTPException(400, "Profesional inexistente")
+    options = flow.options_for_day(conn, catalog, service_id, professional_id, day, "any", None, now)
+    return {
+        "day": day.isoformat(),
+        "options": [
+            {
+                "professional_id": o.professional_id,
+                "professional_name": o.professional_name,
+                "start": o.start.isoformat(),
+                "label": o.label,
+            }
+            for o in options
+        ],
     }
 
 
