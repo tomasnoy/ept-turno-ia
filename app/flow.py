@@ -100,12 +100,14 @@ def _matches(start: datetime, part: str, exact: time | None) -> bool:
 def options_for_day(
     conn, catalog: Catalog, service_id, professional_id, day, part, exact, now
 ) -> list[Option]:
+    if catalog.business_id is None:
+        raise ValueError("El catalogo debe estar asociado a un negocio")
     professionals = [
         (i, n) for i, n in catalog.professionals if professional_id in (None, i)
     ]
     found: list[Option] = []
     for pid, name in professionals:
-        for start in scheduling.free_slots(conn, pid, service_id, day, now=now):
+        for start in scheduling.free_slots(conn, catalog.business_id, pid, service_id, day, now=now):
             if _matches(start, part, exact):
                 found.append(Option(pid, name, start))
     if exact is not None:

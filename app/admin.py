@@ -3,6 +3,7 @@
 import re
 import sqlite3
 from datetime import date, datetime, timedelta
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
@@ -37,9 +38,9 @@ def agenda(
                   p.name AS professional, p.id AS professional_id,
                   c.name AS customer, c.phone AS phone
            FROM appointments a
-           JOIN services s ON s.id = a.service_id
-           JOIN professionals p ON p.id = a.professional_id
-           JOIN customers c ON c.id = a.customer_id
+           JOIN services s ON s.id = a.service_id AND s.business_id = a.business_id
+           JOIN professionals p ON p.id = a.professional_id AND p.business_id = a.business_id
+           JOIN customers c ON c.id = a.customer_id AND c.business_id = a.business_id
            WHERE a.business_id = ? AND a.start >= ? AND a.start < ?
            ORDER BY a.start, p.name""",
         (business_id, start.isoformat(), (start + timedelta(days=1)).isoformat()),
@@ -77,10 +78,9 @@ def _owned_appointment(conn: sqlite3.Connection, business_id: int, appointment_i
 def confirm(
     appointment_id: int, business_id: int = Depends(require_business), conn: sqlite3.Connection = Depends(get_conn)
 ) -> dict:
-    row = _owned_appointment(conn, business_id, appointment_id)
-    if row["status"] != "pending":
+    if not scheduling.confirm(conn, business_id, appointment_id):
+        _owned_appointment(conn, business_id, appointment_id)
         raise HTTPException(409, "Ese turno no está pendiente de confirmación.")
-    scheduling.confirm(conn, appointment_id)
     return {"appointment_id": appointment_id, "status": "confirmed"}
 
 
@@ -91,12 +91,12 @@ def cancel(
     conn: sqlite3.Connection = Depends(get_conn),
     now: datetime = Depends(get_now),
 ) -> dict:
-    row = _owned_appointment(conn, business_id, appointment_id)
-    if row["status"] == "cancelled":
+    freed_start = scheduling.cancel(conn, business_id, appointment_id)
+    if freed_start is None:
+        _owned_appointment(conn, business_id, appointment_id)
         raise HTTPException(409, "Ese turno ya estaba cancelado.")
-    scheduling.cancel(conn, appointment_id)
     # Reacomodo: a quien esta esperando se le puede ofrecer el lugar que se acaba de liberar.
-    freed_day = datetime.fromisoformat(row["start"]).date()
+    freed_day = datetime.fromisoformat(freed_start).date()
     matches = waitlist.matches_for_day(conn, business_id, freed_day, now)
     return {
         "appointment_id": appointment_id,
@@ -160,6 +160,16 @@ class BrandingIn(BaseModel):
     logo_url: str | None = Field(default=None, max_length=500)
     color_primary: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
 
+    @field_validator("logo_url")
+    @classmethod
+    def _safe_logo_url(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        parsed = urlsplit(value)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+            raise ValueError("El logo debe ser una URL HTTPS válida y sin credenciales.")
+        return value
+
 
 @router.get("/business")
 def get_business(business_id: int = Depends(require_business), conn: sqlite3.Connection = Depends(get_conn)) -> dict:
@@ -191,15 +201,21 @@ def put_plan(
     body: PlanIn, business_id: int = Depends(require_business), conn: sqlite3.Connection = Depends(get_conn)
 ) -> dict:
     """Cambia de plan. No procesa ningun cobro real: es una simulacion para la demo."""
-    current = tenancy.professional_count(conn, business_id)
-    limit = tenancy.PLAN_PROFESSIONAL_LIMITS[body.plan]
-    if limit is not None and current > limit:
-        raise HTTPException(
-            409,
-            f"Tenés {current} profesionales cargados y el plan {tenancy.PLAN_LABELS[body.plan]} permite hasta {limit}. "
-            "Desactivá o eliminá alguno antes de bajar de plan.",
-        )
-    tenancy.update_plan(conn, business_id, body.plan)
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        current = tenancy.professional_count(conn, business_id)
+        limit = tenancy.PLAN_PROFESSIONAL_LIMITS[body.plan]
+        if limit is not None and current > limit:
+            raise HTTPException(
+                409,
+                f"Tenés {current} profesionales cargados y el plan {tenancy.PLAN_LABELS[body.plan]} "
+                f"permite hasta {limit}. Reducí la cantidad antes de bajar de plan.",
+            )
+        conn.execute("UPDATE businesses SET plan = ? WHERE id = ?", (body.plan, business_id))
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return tenancy.to_public(tenancy.get_by_id(conn, business_id))
 
 
@@ -233,7 +249,8 @@ def create_service(
     )
     conn.commit()
     row = conn.execute(
-        "SELECT id, name, duration_min, active FROM services WHERE id = ?", (cur.lastrowid,)
+        "SELECT id, name, duration_min, active FROM services WHERE id = ? AND business_id = ?",
+        (cur.lastrowid, business_id),
     ).fetchone()
     return _service_row(row)
 
@@ -250,11 +267,14 @@ def update_service(
     ).fetchone() is None:
         raise HTTPException(404, "El servicio no existe.")
     conn.execute(
-        "UPDATE services SET name = ?, duration_min = ?, active = ? WHERE id = ?",
-        (body.name, body.duration_min, int(body.active), service_id),
+        "UPDATE services SET name = ?, duration_min = ?, active = ? WHERE id = ? AND business_id = ?",
+        (body.name, body.duration_min, int(body.active), service_id, business_id),
     )
     conn.commit()
-    row = conn.execute("SELECT id, name, duration_min, active FROM services WHERE id = ?", (service_id,)).fetchone()
+    row = conn.execute(
+        "SELECT id, name, duration_min, active FROM services WHERE id = ? AND business_id = ?",
+        (service_id, business_id),
+    ).fetchone()
     return _service_row(row)
 
 
@@ -283,21 +303,29 @@ def create_professional(
     business_id: int = Depends(require_business),
     conn: sqlite3.Connection = Depends(get_conn),
 ) -> dict:
-    business = tenancy.get_by_id(conn, business_id)
-    limit = tenancy.PLAN_PROFESSIONAL_LIMITS[business["plan"]]
-    current = tenancy.professional_count(conn, business_id)
-    if limit is not None and current >= limit:
-        raise HTTPException(
-            409,
-            f"Tu plan {tenancy.PLAN_LABELS[business['plan']]} permite hasta {limit} "
-            f"{'profesional' if limit == 1 else 'profesionales'}. Mejorá tu plan para agregar más.",
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        business = tenancy.get_by_id(conn, business_id)
+        limit = tenancy.PLAN_PROFESSIONAL_LIMITS[business["plan"]]
+        current = tenancy.professional_count(conn, business_id)
+        if limit is not None and current >= limit:
+            raise HTTPException(
+                409,
+                f"Tu plan {tenancy.PLAN_LABELS[business['plan']]} permite hasta {limit} "
+                f"{'profesional' if limit == 1 else 'profesionales'}. Mejorá tu plan para agregar más.",
+            )
+        cur = conn.execute(
+            "INSERT INTO professionals (business_id, name, active) VALUES (?, ?, ?)",
+            (business_id, body.name, int(body.active)),
         )
-    cur = conn.execute(
-        "INSERT INTO professionals (business_id, name, active) VALUES (?, ?, ?)",
-        (business_id, body.name, int(body.active)),
-    )
-    conn.commit()
-    row = conn.execute("SELECT id, name, active FROM professionals WHERE id = ?", (cur.lastrowid,)).fetchone()
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    row = conn.execute(
+        "SELECT id, name, active FROM professionals WHERE id = ? AND business_id = ?",
+        (cur.lastrowid, business_id),
+    ).fetchone()
     return _professional_row(row)
 
 
@@ -313,11 +341,14 @@ def update_professional(
     ).fetchone() is None:
         raise HTTPException(404, "El profesional no existe.")
     conn.execute(
-        "UPDATE professionals SET name = ?, active = ? WHERE id = ?",
-        (body.name, int(body.active), professional_id),
+        "UPDATE professionals SET name = ?, active = ? WHERE id = ? AND business_id = ?",
+        (body.name, int(body.active), professional_id, business_id),
     )
     conn.commit()
-    row = conn.execute("SELECT id, name, active FROM professionals WHERE id = ?", (professional_id,)).fetchone()
+    row = conn.execute(
+        "SELECT id, name, active FROM professionals WHERE id = ? AND business_id = ?",
+        (professional_id, business_id),
+    ).fetchone()
     return _professional_row(row)
 
 

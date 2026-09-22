@@ -8,8 +8,9 @@ que filtra todas las consultas de ese negocio.
 import hashlib
 import hmac
 import secrets
+import threading
 import time
-from collections import defaultdict
+from collections import OrderedDict
 from datetime import datetime, timedelta
 
 from fastapi import Depends, Header, HTTPException
@@ -20,24 +21,79 @@ PBKDF2_ITERATIONS = 200_000
 SESSION_TTL_DAYS = 7
 MAX_FAILURES = 10
 WINDOW_SECONDS = 300
+MAX_RATE_LIMIT_BUCKETS = 10_000
+MAX_ACTIVE_SESSIONS = 5
 
-_failures: dict[str, list[float]] = defaultdict(list)
+_request_events: OrderedDict[str, list[float]] = OrderedDict()
+_request_events_lock = threading.Lock()
 
 
 def reset_failures() -> None:
-    _failures.clear()
+    with _request_events_lock:
+        _request_events.clear()
 
 
-def check_rate_limit(ip: str) -> None:
+def begin_login(conn, ip: str, email: str) -> tuple[str, str]:
+    """Reserva atomica y persistente de un intento por IP y cuenta."""
+    keys = (f"ip:{ip}", f"account:{email.lower().strip()}")
+    now = time.time()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute("DELETE FROM login_rate_limits WHERE window_started <= ?", (now - WINDOW_SECONDS,))
+        counts = {
+            key: (row["failures"] if (row := conn.execute(
+                "SELECT failures FROM login_rate_limits WHERE key = ?", (key,)
+            ).fetchone()) else 0)
+            for key in keys
+        }
+        if any(count >= MAX_FAILURES for count in counts.values()):
+            conn.commit()
+            raise HTTPException(429, "Demasiados intentos fallidos. Esperá unos minutos y probá de nuevo.")
+        new_keys = sum(1 for count in counts.values() if count == 0)
+        total = conn.execute("SELECT COUNT(*) FROM login_rate_limits").fetchone()[0]
+        if total + new_keys > MAX_RATE_LIMIT_BUCKETS:
+            conn.commit()
+            raise HTTPException(429, "El servicio de acceso está temporalmente saturado. Probá más tarde.")
+        for key in keys:
+            conn.execute(
+                """INSERT INTO login_rate_limits (key, failures, window_started, updated_at)
+                   VALUES (?, 1, ?, ?)
+                   ON CONFLICT(key) DO UPDATE SET failures = failures + 1, updated_at = excluded.updated_at""",
+                (key, now, now),
+            )
+        conn.commit()
+        return keys
+    except Exception:
+        if conn.in_transaction:
+            conn.rollback()
+        raise
+
+
+def login_succeeded(conn, keys: tuple[str, str]) -> None:
+    """Un intento exitoso no consume el cupo; quita solo su reserva pendiente."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        for key in keys:
+            conn.execute("UPDATE login_rate_limits SET failures = failures - 1 WHERE key = ?", (key,))
+        conn.execute("DELETE FROM login_rate_limits WHERE failures <= 0")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
+def check_request_limit(key: str, limit: int, window_seconds: int) -> None:
+    """Limite local acotado para endpoints publicos; el proxy debe aportar el limite distribuido."""
     now = time.monotonic()
-    recent = [t for t in _failures[ip] if now - t < WINDOW_SECONDS]
-    _failures[ip] = recent
-    if len(recent) >= MAX_FAILURES:
-        raise HTTPException(429, "Demasiados intentos fallidos. Esperá unos minutos y probá de nuevo.")
-
-
-def record_failure(ip: str) -> None:
-    _failures[ip].append(time.monotonic())
+    with _request_events_lock:
+        recent = [t for t in _request_events.get(key, ()) if now - t < window_seconds]
+        if len(recent) >= limit:
+            raise HTTPException(429, "Demasiadas solicitudes. Esperá unos minutos y probá de nuevo.")
+        recent.append(now)
+        _request_events[key] = recent
+        _request_events.move_to_end(key)
+        while len(_request_events) > MAX_RATE_LIMIT_BUCKETS:
+            _request_events.popitem(last=False)
 
 
 def hash_password(password: str) -> str:
@@ -58,9 +114,18 @@ def verify_password(password: str, stored: str) -> bool:
 def create_session(conn, business_id: int, now: datetime) -> str:
     token = secrets.token_urlsafe(32)
     expires = now + timedelta(days=SESSION_TTL_DAYS)
+    conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now.isoformat(),))
     conn.execute(
         "INSERT INTO sessions (token, business_id, created_at, expires_at) VALUES (?, ?, ?, ?)",
         (token, business_id, now.isoformat(), expires.isoformat()),
+    )
+    conn.execute(
+        """DELETE FROM sessions
+           WHERE business_id = ? AND token NOT IN (
+               SELECT token FROM sessions WHERE business_id = ?
+               ORDER BY created_at DESC, rowid DESC LIMIT ?
+           )""",
+        (business_id, business_id, MAX_ACTIVE_SESSIONS),
     )
     conn.commit()
     return token
@@ -82,6 +147,10 @@ def require_business(
     row = conn.execute(
         "SELECT business_id, expires_at FROM sessions WHERE token = ?", (x_session_token,)
     ).fetchone()
-    if row is None or datetime.fromisoformat(row["expires_at"]) < now:
+    if row is None:
+        raise HTTPException(401, "La sesión venció o no es válida. Iniciá sesión de nuevo.")
+    if datetime.fromisoformat(row["expires_at"]) <= now:
+        conn.execute("DELETE FROM sessions WHERE token = ?", (x_session_token,))
+        conn.commit()
         raise HTTPException(401, "La sesión venció o no es válida. Iniciá sesión de nuevo.")
     return row["business_id"]

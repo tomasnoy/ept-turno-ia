@@ -38,8 +38,13 @@ class SignupIn(BaseModel):
 
 @router.post("/signup")
 def signup(
-    body: SignupIn, conn: sqlite3.Connection = Depends(get_conn), now: datetime = Depends(get_now)
+    body: SignupIn,
+    request: Request,
+    conn: sqlite3.Connection = Depends(get_conn),
+    now: datetime = Depends(get_now),
 ) -> dict:
+    ip = request.client.host if request.client else "desconocido"
+    auth.check_request_limit(f"signup:{ip}", limit=5, window_seconds=3600)
     try:
         business = tenancy.create(conn, body.business_name, body.email, body.password, body.plan, now)
     except tenancy.EmailTaken:
@@ -58,11 +63,11 @@ def login(
     body: LoginIn, request: Request, conn: sqlite3.Connection = Depends(get_conn), now: datetime = Depends(get_now)
 ) -> dict:
     ip = request.client.host if request.client else "desconocido"
-    auth.check_rate_limit(ip)
+    reservation = auth.begin_login(conn, ip, body.email)
     business = tenancy.authenticate(conn, body.email, body.password)
     if business is None:
-        auth.record_failure(ip)
         raise HTTPException(401, "Email o clave incorrectos.")
+    auth.login_succeeded(conn, reservation)
     token = auth.create_session(conn, business["id"], now)
     return {"session_token": token, "business": tenancy.to_public(business)}
 

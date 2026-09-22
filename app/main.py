@@ -4,12 +4,12 @@ from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from app import accounts, admin, config, customers, db, flow, scheduling, seed, tenancy, waitlist
+from app import accounts, admin, auth, config, customers, db, flow, scheduling, seed, tenancy, waitlist
 from app.deps import get_conn, get_llm, get_now
 from app.llm.base import LLMError, LLMProvider
 
@@ -29,6 +29,19 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Gestor de turnos con IA (SaaS multi-negocio)", lifespan=lifespan)
 app.include_router(admin.router)
 app.include_router(accounts.router)
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "img-src 'self' https:; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    )
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
 
 
 def get_business_by_slug(slug: str, conn: sqlite3.Connection = Depends(get_conn)) -> sqlite3.Row:
@@ -131,11 +144,14 @@ def business(business=Depends(get_business_by_slug), conn=Depends(get_conn)) -> 
 @app.post("/api/b/{slug}/chat")
 def chat(
     body: ChatIn,
+    request: Request,
     business=Depends(get_business_by_slug),
     conn=Depends(get_conn),
     provider: LLMProvider = Depends(get_llm),
     now: datetime = Depends(get_now),
 ) -> dict:
+    ip = request.client.host if request.client else "desconocido"
+    auth.check_request_limit(f"chat:{business['id']}:{ip}", limit=30, window_seconds=60)
     ctx = flow.Context(body.context.service_id, body.context.professional_id, body.context.day)
     try:
         result = flow.handle_message(conn, provider, business["id"], body.message, ctx, now)
@@ -202,26 +218,31 @@ def slots(
 
 
 @app.post("/api/b/{slug}/book")
-def book(body: BookIn, business=Depends(get_business_by_slug), conn=Depends(get_conn)) -> dict:
+def book(body: BookIn, request: Request, business=Depends(get_business_by_slug), conn=Depends(get_conn)) -> dict:
     business_id = business["id"]
+    ip = request.client.host if request.client else "desconocido"
+    auth.check_request_limit(f"book:{business_id}:{ip}", limit=15, window_seconds=300)
     catalog = flow.load_catalog(conn, business_id)
     services = dict(catalog.services)
     professionals = dict(catalog.professionals)
     if body.service_id not in services or body.professional_id not in professionals:
         raise HTTPException(400, "Servicio o profesional inexistente")
 
-    customer_id = customers.find_by_phone(conn, business_id, body.phone)
+    conn.execute("BEGIN IMMEDIATE")
     try:
-        # El turno se valida antes de crear al cliente, asi un horario ocupado no deja registros sueltos.
-        if body.start not in scheduling.free_slots(conn, body.professional_id, body.service_id, body.start.date()):
-            raise scheduling.SlotUnavailable(body.start.isoformat())
+        customer_id = customers.find_by_phone(conn, business_id, body.phone)
         if customer_id is None:
             customer_id = customers.create(conn, business_id, body.customer_name, body.phone)
         appointment_id = scheduling.book(
             conn, business_id, customer_id, body.professional_id, body.service_id, body.start
         )
+        conn.commit()
     except scheduling.SlotUnavailable:
+        conn.rollback()
         raise HTTPException(409, "Ese horario ya no está disponible. Elegí otro, por favor.")
+    except Exception:
+        conn.rollback()
+        raise
     return {
         "appointment_id": appointment_id,
         "summary": (
@@ -234,9 +255,15 @@ def book(body: BookIn, business=Depends(get_business_by_slug), conn=Depends(get_
 
 @app.post("/api/b/{slug}/waitlist")
 def join_waitlist(
-    body: WaitlistIn, business=Depends(get_business_by_slug), conn=Depends(get_conn), now: datetime = Depends(get_now)
+    body: WaitlistIn,
+    request: Request,
+    business=Depends(get_business_by_slug),
+    conn=Depends(get_conn),
+    now: datetime = Depends(get_now),
 ) -> dict:
     business_id = business["id"]
+    ip = request.client.host if request.client else "desconocido"
+    auth.check_request_limit(f"waitlist:{business_id}:{ip}", limit=15, window_seconds=300)
     catalog = flow.load_catalog(conn, business_id)
     if body.service_id not in dict(catalog.services) or (
         body.professional_id is not None and body.professional_id not in dict(catalog.professionals)
@@ -245,17 +272,23 @@ def join_waitlist(
     if not (now.date() <= body.day <= now.date() + timedelta(days=MAX_WAITLIST_DAYS_AHEAD)):
         raise HTTPException(400, "Elegí un día entre hoy y los próximos 60 días.")
 
-    customer_id = customers.find_by_phone(conn, business_id, body.phone) or customers.create(
-        conn, business_id, body.customer_name, body.phone
-    )
+    conn.execute("BEGIN IMMEDIATE")
     try:
+        customer_id = customers.find_by_phone(conn, business_id, body.phone) or customers.create(
+            conn, business_id, body.customer_name, body.phone
+        )
         _, created = waitlist.add_entry(
             conn, business_id, customer_id, body.service_id, body.professional_id, body.day, body.part_of_day, now
         )
+        conn.commit()
     except waitlist.WaitlistFull:
+        conn.rollback()
         raise HTTPException(
             409, f"Ya estás en {waitlist.MAX_WAITING_PER_CUSTOMER} listas de espera. Esperá a que el negocio te contacte."
         )
+    except Exception:
+        conn.rollback()
+        raise
     label = flow.WaitlistOffer(body.service_id, body.professional_id, body.day, body.part_of_day).label
     prefix = "Listo, te anotamos" if created else "Ya estabas anotado/a"
     return {"created": created, "summary": f"{prefix} para el {label}. Si se libera un lugar, el negocio te va a contactar."}

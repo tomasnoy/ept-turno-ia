@@ -42,6 +42,7 @@ Hoy es {today_name} {today_iso}."""
 class Catalog:
     services: list[tuple[int, str]]
     professionals: list[tuple[int, str]]
+    business_id: int | None = None
 
 
 @dataclass
@@ -67,7 +68,7 @@ def load_catalog(conn: sqlite3.Connection, business_id: int) -> Catalog:
             "SELECT id, name FROM professionals WHERE business_id = ? AND active = 1", (business_id,)
         )
     ]
-    return Catalog(services, professionals)
+    return Catalog(services, professionals, business_id)
 
 
 def _normalize(text: str) -> str:

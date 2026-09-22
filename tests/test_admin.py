@@ -1,4 +1,7 @@
 from datetime import date
+from concurrent.futures import ThreadPoolExecutor
+
+from fastapi import HTTPException
 
 from app import auth
 
@@ -32,6 +35,7 @@ def test_sesion_vencida_no_sirve(client):
     )
     conn.commit()
     assert client.get("/api/admin/agenda", headers={"X-Session-Token": "vencido"}).status_code == 401
+    assert conn.execute("SELECT 1 FROM sessions WHERE token = 'vencido'").fetchone() is None
 
 
 def test_check_valida_la_sesion(client):
@@ -100,6 +104,8 @@ def test_pagina_del_panel_se_sirve_sin_datos(client):
     resp = client.get("/admin")
     assert resp.status_code == 200
     assert "Ana" not in resp.text
+    assert "frame-ancestors 'none'" in resp.headers["Content-Security-Policy"]
+    assert resp.headers["Referrer-Policy"] == "no-referrer"
 
 
 # --- Confirmar turnos ---------------------------------------------------------------------------
@@ -149,6 +155,15 @@ def test_color_invalido_se_rechaza(client):
     assert resp.status_code == 422
 
 
+def test_logo_debe_ser_https(client):
+    resp = client.put(
+        "/api/admin/business",
+        json={"name": "X", "logo_url": "http://tracker.example/logo.png"},
+        headers=client.admin_headers,
+    )
+    assert resp.status_code == 422
+
+
 # --- Configuracion: plan y limite de profesionales -------------------------------------------------
 
 
@@ -181,6 +196,56 @@ def test_limite_de_profesionales_del_plan_basico(client):
     resp = client.post("/api/admin/professionals", json={"name": "Segunda"}, headers=headers)
     assert resp.status_code == 409
     assert "plan" in resp.json()["detail"].lower()
+
+
+def test_limite_basico_resiste_creaciones_concurrentes(client):
+    signup = client.post(
+        "/api/signup",
+        json={"business_name": "Negocio Carrera", "email": "race@x.com", "password": "clave1234"},
+    ).json()
+    headers = {"X-Session-Token": signup["session_token"]}
+
+    def create(name):
+        return client.post("/api/admin/professionals", json={"name": name}, headers=headers).status_code
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        statuses = list(pool.map(create, ("Primera", "Segunda")))
+    assert sorted(statuses) == [200, 409]
+
+
+def test_login_en_rafaga_respeta_el_limite_atomico(tmp_path):
+    from app import db
+
+    auth.reset_failures()
+    path = str(tmp_path / "rate-limit.db")
+    setup = db.connect(path)
+    db.init_db(setup)
+    setup.close()
+
+    def attempt(_):
+        conn = db.connect(path)
+        try:
+            auth.begin_login(conn, "203.0.113.10", "cuenta@x.com")
+            return True
+        except HTTPException as exc:
+            assert exc.status_code == 429
+            return False
+        finally:
+            conn.close()
+
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        results = list(pool.map(attempt, range(12)))
+    assert results.count(True) == auth.MAX_FAILURES
+
+
+def test_solo_se_conservan_las_sesiones_mas_recientes(client):
+    from app import db
+    from app.seed import DEMO_EMAIL, DEMO_PASSWORD
+
+    for _ in range(auth.MAX_ACTIVE_SESSIONS + 2):
+        assert client.post("/api/login", json={"email": DEMO_EMAIL, "password": DEMO_PASSWORD}).status_code == 200
+    conn = db.connect()
+    assert conn.execute("SELECT COUNT(*) FROM sessions WHERE business_id = 1").fetchone()[0] == auth.MAX_ACTIVE_SESSIONS
 
 
 # --- Configuracion: servicios y profesionales ----------------------------------------------------
@@ -281,4 +346,4 @@ def test_vaciar_los_horarios_deja_el_dia_sin_turnos(client):
     from app import db, scheduling
 
     conn = db.connect()
-    assert scheduling.free_slots(conn, 1, 1, date(2026, 9, 21)) == []
+    assert scheduling.free_slots(conn, 1, 1, 1, date(2026, 9, 21)) == []

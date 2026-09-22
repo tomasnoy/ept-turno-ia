@@ -81,11 +81,13 @@ determinista: los datos de los clientes no pasan por el modelo de IA.
 - Aplicación: https://ept-turno-ia.onrender.com (landing) — cada negocio se registra en `/registro`
   y gestiona su agenda en `/admin`.
 - Hosting: Render, plan gratuito, región Virginia. Despliegue automático en cada push a `main`.
-- Variables de entorno en Render: `LLM_PROVIDER=gemini`, `TIMEZONE`,
-  `FORWARDED_ALLOW_IPS=*` (detrás del proxy de Render, para identificar a cada visitante), y el
+- Variables de entorno en Render: `LLM_PROVIDER=gemini`, `TIMEZONE`, y el
   secreto `GEMINI_API_KEY`, cargado solo en el panel de Render. `BUSINESS_NAME` y `ADMIN_TOKEN`
   quedan como variables heredadas del proyecto pre-SaaS (single-tenant): solo se usan si la base
   ya tenía datos de esa época, para no perderlos al migrar.
+- Si se habilitan proxy headers en Uvicorn, `FORWARDED_ALLOW_IPS` debe contener únicamente las IPs
+  o redes del proxy confiable. No usar `*` si la aplicación puede recibir conexiones directas ni
+  si el proxy conserva un `X-Forwarded-For` enviado por el cliente.
 - Limitaciones del plan gratuito: la app se duerme tras unos minutos sin uso (la primera visita
   tarda en despertar) y el disco es efímero, por lo que la base SQLite (negocios, turnos, etc.) se
   recrea desde cero —con un negocio demo de ejemplo— en cada reinicio o despliegue.

@@ -192,6 +192,29 @@ def test_no_se_le_da_otro_profesional_al_que_pidio_uno(client):
     assert client.post("/api/admin/waitlist/1/book", json=laura, headers=client.admin_headers).status_code == 409
 
 
+def test_no_se_puede_asignar_un_profesional_de_otro_negocio(client):
+    anotarse(client)
+    conn = db.connect()
+    conn.execute(
+        """INSERT INTO businesses (id, slug, name, email, password_hash, created_at)
+           VALUES (2, 'otro', 'Otro', 'otro@x.com', 'x', '2026-01-01')"""
+    )
+    conn.execute("INSERT INTO professionals (id, business_id, name) VALUES (99, 2, 'Profesional Ajeno')")
+    conn.execute(
+        """INSERT INTO working_hours (business_id, professional_id, weekday, start, end)
+           VALUES (2, 99, 5, '09:00', '14:00')"""
+    )
+    conn.commit()
+
+    resp = client.post(
+        "/api/admin/waitlist/1/book",
+        json={"professional_id": 99, "start": f"{SABADO}T09:00:00"},
+        headers=client.admin_headers,
+    )
+    assert resp.status_code == 409
+    assert conn.execute("SELECT COUNT(*) FROM appointments WHERE professional_id = 99").fetchone()[0] == 0
+
+
 def test_quitar_de_la_lista(client):
     anotarse(client)
     assert client.post("/api/admin/waitlist/1/remove", headers=client.admin_headers).status_code == 200
