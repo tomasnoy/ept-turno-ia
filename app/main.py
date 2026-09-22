@@ -1,4 +1,5 @@
 import re
+import sqlite3
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -8,7 +9,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 
-from app import admin, config, customers, db, flow, scheduling, seed, settings, waitlist
+from app import accounts, admin, config, customers, db, flow, scheduling, seed, tenancy, waitlist
 from app.deps import get_conn, get_llm, get_now
 from app.llm.base import LLMError, LLMProvider
 
@@ -25,8 +26,16 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title="Gestor de turnos con IA", lifespan=lifespan)
+app = FastAPI(title="Gestor de turnos con IA (SaaS multi-negocio)", lifespan=lifespan)
 app.include_router(admin.router)
+app.include_router(accounts.router)
+
+
+def get_business_by_slug(slug: str, conn: sqlite3.Connection = Depends(get_conn)) -> sqlite3.Row:
+    business = tenancy.get_by_slug(conn, slug)
+    if business is None:
+        raise HTTPException(404, "Ese negocio no existe.")
+    return business
 
 
 class ContextIn(BaseModel):
@@ -94,28 +103,42 @@ def health() -> dict:
     return {"status": "ok", "llm_provider": config.LLM_PROVIDER}
 
 
-@app.get("/api/business")
-def business(conn=Depends(get_conn)) -> dict:
-    catalog = flow.load_catalog(conn)
-    s = settings.get_all(conn)
+@app.get("/api/plans")
+def plans() -> dict:
     return {
-        "name": s["business_name"],
-        "welcome_message": s["welcome_message"],
+        "plans": [
+            {
+                "id": plan_id,
+                "label": tenancy.PLAN_LABELS[plan_id],
+                "professional_limit": tenancy.PLAN_PROFESSIONAL_LIMITS[plan_id],
+                "free": plan_id == "basico",
+            }
+            for plan_id in tenancy.PLANS
+        ]
+    }
+
+
+@app.get("/api/b/{slug}/business")
+def business(business=Depends(get_business_by_slug), conn=Depends(get_conn)) -> dict:
+    catalog = flow.load_catalog(conn, business["id"])
+    return {
+        **tenancy.to_public(business),
         "services": [{"id": i, "name": n} for i, n in catalog.services],
         "professionals": [{"id": i, "name": n} for i, n in catalog.professionals],
     }
 
 
-@app.post("/api/chat")
+@app.post("/api/b/{slug}/chat")
 def chat(
     body: ChatIn,
+    business=Depends(get_business_by_slug),
     conn=Depends(get_conn),
     provider: LLMProvider = Depends(get_llm),
     now: datetime = Depends(get_now),
 ) -> dict:
     ctx = flow.Context(body.context.service_id, body.context.professional_id, body.context.day)
     try:
-        result = flow.handle_message(conn, provider, body.message, ctx, now)
+        result = flow.handle_message(conn, provider, business["id"], body.message, ctx, now)
     except LLMError:
         raise HTTPException(503, "El asistente no está disponible en este momento. Probá de nuevo en unos segundos.")
     return {
@@ -149,15 +172,16 @@ def chat(
     }
 
 
-@app.get("/api/slots")
+@app.get("/api/b/{slug}/slots")
 def slots(
     service_id: int,
     day: date,
     professional_id: int | None = None,
+    business=Depends(get_business_by_slug),
     conn=Depends(get_conn),
     now: datetime = Depends(get_now),
 ) -> dict:
-    catalog = flow.load_catalog(conn)
+    catalog = flow.load_catalog(conn, business["id"])
     if service_id not in dict(catalog.services):
         raise HTTPException(400, "Servicio inexistente")
     if professional_id is not None and professional_id not in dict(catalog.professionals):
@@ -177,23 +201,24 @@ def slots(
     }
 
 
-@app.post("/api/book")
-def book(body: BookIn, conn=Depends(get_conn)) -> dict:
-    catalog = flow.load_catalog(conn)
+@app.post("/api/b/{slug}/book")
+def book(body: BookIn, business=Depends(get_business_by_slug), conn=Depends(get_conn)) -> dict:
+    business_id = business["id"]
+    catalog = flow.load_catalog(conn, business_id)
     services = dict(catalog.services)
     professionals = dict(catalog.professionals)
     if body.service_id not in services or body.professional_id not in professionals:
         raise HTTPException(400, "Servicio o profesional inexistente")
 
-    customer_id = customers.find_by_phone(conn, body.phone)
+    customer_id = customers.find_by_phone(conn, business_id, body.phone)
     try:
         # El turno se valida antes de crear al cliente, asi un horario ocupado no deja registros sueltos.
         if body.start not in scheduling.free_slots(conn, body.professional_id, body.service_id, body.start.date()):
             raise scheduling.SlotUnavailable(body.start.isoformat())
         if customer_id is None:
-            customer_id = customers.create(conn, body.customer_name, body.phone)
+            customer_id = customers.create(conn, business_id, body.customer_name, body.phone)
         appointment_id = scheduling.book(
-            conn, customer_id, body.professional_id, body.service_id, body.start
+            conn, business_id, customer_id, body.professional_id, body.service_id, body.start
         )
     except scheduling.SlotUnavailable:
         raise HTTPException(409, "Ese horario ya no está disponible. Elegí otro, por favor.")
@@ -207,9 +232,12 @@ def book(body: BookIn, conn=Depends(get_conn)) -> dict:
     }
 
 
-@app.post("/api/waitlist")
-def join_waitlist(body: WaitlistIn, conn=Depends(get_conn), now: datetime = Depends(get_now)) -> dict:
-    catalog = flow.load_catalog(conn)
+@app.post("/api/b/{slug}/waitlist")
+def join_waitlist(
+    body: WaitlistIn, business=Depends(get_business_by_slug), conn=Depends(get_conn), now: datetime = Depends(get_now)
+) -> dict:
+    business_id = business["id"]
+    catalog = flow.load_catalog(conn, business_id)
     if body.service_id not in dict(catalog.services) or (
         body.professional_id is not None and body.professional_id not in dict(catalog.professionals)
     ):
@@ -217,10 +245,12 @@ def join_waitlist(body: WaitlistIn, conn=Depends(get_conn), now: datetime = Depe
     if not (now.date() <= body.day <= now.date() + timedelta(days=MAX_WAITLIST_DAYS_AHEAD)):
         raise HTTPException(400, "Elegí un día entre hoy y los próximos 60 días.")
 
-    customer_id = customers.find_by_phone(conn, body.phone) or customers.create(conn, body.customer_name, body.phone)
+    customer_id = customers.find_by_phone(conn, business_id, body.phone) or customers.create(
+        conn, business_id, body.customer_name, body.phone
+    )
     try:
         _, created = waitlist.add_entry(
-            conn, customer_id, body.service_id, body.professional_id, body.day, body.part_of_day, now
+            conn, business_id, customer_id, body.service_id, body.professional_id, body.day, body.part_of_day, now
         )
     except waitlist.WaitlistFull:
         raise HTTPException(
@@ -232,13 +262,23 @@ def join_waitlist(body: WaitlistIn, conn=Depends(get_conn), now: datetime = Depe
 
 
 @app.get("/")
-def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+def landing() -> FileResponse:
+    return FileResponse(STATIC_DIR / "landing.html")
+
+
+@app.get("/registro")
+def signup_page() -> FileResponse:
+    return FileResponse(STATIC_DIR / "signup.html")
 
 
 @app.get("/admin")
 def admin_page() -> FileResponse:
     return FileResponse(STATIC_DIR / "admin.html")
+
+
+@app.get("/b/{slug}")
+def business_page(slug: str) -> FileResponse:
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

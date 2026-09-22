@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Turnos con IA para tu negocio</title>
+<style>
+  :root {
+    --bg: #f4f1ec; --card: #ffffff; --ink: #1f2933; --muted: #62707e;
+    --accent: #7a3e65; --accent-ink: #ffffff; --line: #ddd5dc; --soft: #efe7ee;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17141a; --card: #221e26; --ink: #ece7ee; --muted: #a79fab;
+      --accent: #c78ab3; --accent-ink: #1a1220; --line: #3b3441; --soft: #2e2833;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 17px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  a { color: var(--accent); }
+  .wrap { max-width: 920px; margin: 0 auto; padding: 0 20px; }
+  header { display: flex; justify-content: space-between; align-items: center; padding: 20px 0; }
+  header .brand { font-weight: 700; font-size: 1.2rem; }
+  header nav a { margin-left: 16px; text-decoration: none; font-weight: 600; }
+  .btn { display: inline-block; text-decoration: none; font-weight: 600; border-radius: 12px;
+         padding: 12px 22px; min-height: 48px; line-height: 24px; }
+  .btn.primary { background: var(--accent); color: var(--accent-ink); }
+  .btn.ghost { border: 1.5px solid var(--accent); color: var(--accent); }
+  .hero { text-align: center; padding: 60px 0 40px; }
+  .hero h1 { font-size: 2.3rem; margin: 0 0 14px; }
+  .hero p { color: var(--muted); font-size: 1.1rem; max-width: 620px; margin: 0 auto 28px; }
+  .hero .actions { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .hero .demo { margin-top: 14px; font-size: .95rem; color: var(--muted); }
+  section.features { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 18px; margin: 40px 0; }
+  .feature { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
+  .feature h3 { margin: 0 0 8px; font-size: 1.05rem; }
+  .feature p { margin: 0; color: var(--muted); font-size: .95rem; }
+  h2.section-title { text-align: center; font-size: 1.6rem; margin: 50px 0 10px; }
+  p.section-sub { text-align: center; color: var(--muted); margin: 0 0 30px; }
+  .plans { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 18px; margin-bottom: 50px; }
+  .plan { background: var(--card); border: 1.5px solid var(--line); border-radius: 18px; padding: 24px; text-align: center; }
+  .plan.featured { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+  .plan h3 { margin: 0 0 6px; }
+  .plan .price { font-size: 1.8rem; font-weight: 700; margin: 10px 0; }
+  .plan .price small { font-size: .9rem; font-weight: 400; color: var(--muted); }
+  .plan ul { list-style: none; padding: 0; margin: 16px 0 22px; color: var(--muted); font-size: .92rem; text-align: left; }
+  .plan li { padding: 4px 0; }
+  .plan li::before { content: "✓ "; color: var(--accent); font-weight: 700; }
+  footer { text-align: center; color: var(--muted); font-size: .85rem; padding: 30px 0 50px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">Turnos IA</div>
+    <nav>
+      <a href="/admin">Iniciar sesión</a>
+      <a class="btn primary" href="/registro">Registrar mi negocio</a>
+    </nav>
+  </header>
+
+  <section class="hero">
+    <h1>Turnos con IA para negocios chicos</h1>
+    <p>Tus clientes reservan charlando con un asistente. Vos gestionás la agenda, los profesionales y los horarios desde un panel propio. Sin instalar nada.</p>
+    <div class="actions">
+      <a class="btn primary" href="/registro">Registrar mi negocio gratis</a>
+      <a class="btn ghost" href="/b/peluqueria-demo">Probar la demo</a>
+    </div>
+    <p class="demo">¿Querés ver cómo lo ve un cliente? <a href="/b/peluqueria-demo">Abrí el chat de ejemplo</a>.</p>
+  </section>
+
+  <section class="features">
+    <div class="feature">
+      <h3>Reservas por chat</h3>
+      <p>El cliente escribe con sus palabras qué necesita y cuándo; la IA interpreta el pedido y le muestra un calendario con los horarios realmente libres.</p>
+    </div>
+    <div class="feature">
+      <h3>Tu marca, tu página</h3>
+      <p>Elegí el nombre, el logo y el color de tu página de reservas. Cada negocio tiene su propio link para compartir.</p>
+    </div>
+    <div class="feature">
+      <h3>Panel para gestionar todo</h3>
+      <p>Agenda del día, turnos pendientes de confirmar, lista de espera, servicios, profesionales y horarios de atención.</p>
+    </div>
+  </section>
+
+  <h2 class="section-title">Planes</h2>
+  <p class="section-sub">Empezá gratis. Subí de plan cuando sumes más profesionales.</p>
+  <div class="plans" id="plans"></div>
+
+  <footer>Proyecto de curso — demo sin cobros reales.</footer>
+</div>
+
+<script>
+  const PLAN_COPY = {
+    basico: { price: "Gratis", period: "", features: ["1 profesional", "Agenda y lista de espera", "Chat con IA"] },
+    pro: { price: "$9.990", period: "/mes", features: ["Hasta 5 profesionales", "Todo lo de Básico", "Marca personalizada"] },
+    premium: { price: "$19.990", period: "/mes", features: ["Profesionales ilimitados", "Todo lo de Pro", "Soporte prioritario"] },
+  };
+  fetch("/api/plans").then((r) => r.json()).then(({ plans }) => {
+    const box = document.getElementById("plans");
+    plans.forEach((p) => {
+      const copy = PLAN_COPY[p.id] || { price: "", period: "", features: [] };
+      const card = document.createElement("div");
+      card.className = "plan" + (p.id === "pro" ? " featured" : "");
+      card.innerHTML = `
+        <h3>${p.label}</h3>
+        <div class="price">${copy.price}<small>${copy.period}</small></div>
+        <ul>${copy.features.map((f) => `<li>${f}</li>`).join("")}</ul>
+        <a class="btn ${p.id === "pro" ? "primary" : "ghost"}" href="/registro?plan=${p.id}">Elegir ${p.label}</a>`;
+      box.appendChild(card);
+    });
+  }).catch(() => {});
+</script>
+</body>
+</html>

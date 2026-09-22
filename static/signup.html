@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Registrá tu negocio</title>
+<style>
+  :root {
+    --bg: #f4f1ec; --card: #ffffff; --ink: #1f2933; --muted: #62707e;
+    --accent: #7a3e65; --accent-ink: #ffffff; --line: #ddd5dc; --danger: #b3261e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17141a; --card: #221e26; --ink: #ece7ee; --muted: #a79fab;
+      --accent: #c78ab3; --accent-ink: #1a1220; --line: #3b3441; --danger: #f2b8b5;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 17px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width: 480px; margin: 0 auto; padding: 30px 20px 60px; }
+  a { color: var(--accent); }
+  .back { font-size: .9rem; text-decoration: none; }
+  h1 { font-size: 1.5rem; margin: 18px 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 22px; }
+  form { display: flex; flex-direction: column; gap: 14px; background: var(--card); padding: 22px;
+         border-radius: 16px; border: 1px solid var(--line); }
+  label { font-size: .9rem; color: var(--muted); display: block; margin-bottom: 4px; }
+  input { font: inherit; width: 100%; padding: 12px; border-radius: 10px; border: 1.5px solid var(--line);
+          background: var(--bg); color: var(--ink); min-height: 48px; }
+  .plan-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .plan-option { border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 6px; text-align: center;
+                 background: var(--bg); cursor: pointer; font-size: .88rem; }
+  .plan-option input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .plan-option.selected { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+  .plan-option .name { font-weight: 700; display: block; }
+  .plan-option .price { color: var(--muted); font-size: .8rem; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border: 0; border-radius: 12px;
+                   padding: 12px 18px; min-height: 48px; font-weight: 600; font: inherit; cursor: pointer; }
+  button:disabled { opacity: .6; cursor: not-allowed; }
+  .error { color: var(--danger); margin: 0; min-height: 1.3em; font-size: .92rem; }
+  .hint { font-size: .82rem; color: var(--muted); margin: -6px 0 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <a class="back" href="/">← Volver</a>
+  <h1>Registrá tu negocio</h1>
+  <p class="sub">Creá tu cuenta y en un minuto tenés tu propia página de reservas.</p>
+  <form id="signupForm">
+    <div><label for="name">Nombre del negocio</label><input id="name" type="text" minlength="2" maxlength="80" required></div>
+    <div><label for="email">Email</label><input id="email" type="email" required></div>
+    <div><label for="password">Clave</label><input id="password" type="password" minlength="8" required>
+      <p class="hint">Mínimo 8 caracteres.</p></div>
+    <div>
+      <label>Plan</label>
+      <div class="plan-options" id="planOptions"></div>
+    </div>
+    <p class="error" id="signupError" role="alert"></p>
+    <button class="primary" type="submit">Crear mi cuenta</button>
+  </form>
+  <p style="margin-top:14px; text-align:center"><a href="/admin">Ya tengo cuenta, iniciar sesión</a></p>
+</div>
+
+<script>
+  const PLAN_COPY = { basico: { label: "Básico", price: "Gratis" }, pro: { label: "Pro", price: "$9.990/mes" }, premium: { label: "Premium", price: "$19.990/mes" } };
+  const params = new URLSearchParams(location.search);
+  let selectedPlan = params.get("plan") && PLAN_COPY[params.get("plan")] ? params.get("plan") : "basico";
+
+  function renderPlans() {
+    const box = document.getElementById("planOptions");
+    box.replaceChildren();
+    Object.entries(PLAN_COPY).forEach(([id, info]) => {
+      const label = document.createElement("label");
+      label.className = "plan-option" + (id === selectedPlan ? " selected" : "");
+      label.innerHTML = `<input type="radio" name="plan" value="${id}" ${id === selectedPlan ? "checked" : ""}>
+        <span class="name">${info.label}</span><span class="price">${info.price}</span>`;
+      label.addEventListener("click", () => { selectedPlan = id; renderPlans(); });
+      box.appendChild(label);
+    });
+  }
+  renderPlans();
+
+  document.getElementById("signupForm").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const errorEl = document.getElementById("signupError");
+    errorEl.textContent = "";
+    const submit = e.target.querySelector("button[type=submit]");
+    submit.disabled = true; submit.textContent = "Creando…";
+    try {
+      const resp = await fetch("/api/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          business_name: document.getElementById("name").value,
+          email: document.getElementById("email").value,
+          password: document.getElementById("password").value,
+          plan: selectedPlan,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        const detail = Array.isArray(data.detail) ? data.detail.map((d) => d.msg).join(" ") : data.detail;
+        throw new Error(detail || "No pudimos crear la cuenta. Probá de nuevo.");
+      }
+      try { sessionStorage.setItem("sessionToken", data.session_token); } catch (_) {}
+      location.href = "/admin";
+    } catch (err) {
+      errorEl.textContent = err.message;
+      submit.disabled = false; submit.textContent = "Crear mi cuenta";
+    }
+  });
+</script>
+</body>
+</html>

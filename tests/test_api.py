@@ -17,11 +17,11 @@ def usar_modelo(response):
 
 
 def chat(client, message, context=None):
-    return client.post("/api/chat", json={"message": message, "context": context or {}})
+    return client.post(f"/api/b/{client.slug}/chat", json={"message": message, "context": context or {}})
 
 
 def test_business_devuelve_catalogo(client):
-    data = client.get("/api/business").json()
+    data = client.get(f"/api/b/{client.slug}/business").json()
     assert {s["name"] for s in data["services"]} == {"Corte de pelo", "Tintura", "Peinado"}
     assert len(data["professionals"]) == 2
 
@@ -94,7 +94,7 @@ def reservar(client, **overrides):
         "start": "2026-09-25T15:00:00",
     }
     body.update(overrides)
-    return client.post("/api/book", json=body)
+    return client.post(f"/api/b/{client.slug}/book", json=body)
 
 
 def test_reserva_queda_pendiente_y_bloquea_el_horario(client):

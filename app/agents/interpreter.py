@@ -55,11 +55,17 @@ class Intent:
     missing: list[str] = field(default_factory=list)
 
 
-def load_catalog(conn: sqlite3.Connection) -> Catalog:
-    """Solo lo activo se ofrece a los clientes; lo desactivado sigue existiendo por los turnos ya tomados."""
-    services = [(r["id"], r["name"]) for r in conn.execute("SELECT id, name FROM services WHERE active = 1")]
+def load_catalog(conn: sqlite3.Connection, business_id: int) -> Catalog:
+    """Solo lo activo de ESE negocio se ofrece a sus clientes; lo desactivado se conserva por sus turnos ya tomados."""
+    services = [
+        (r["id"], r["name"])
+        for r in conn.execute("SELECT id, name FROM services WHERE business_id = ? AND active = 1", (business_id,))
+    ]
     professionals = [
-        (r["id"], r["name"]) for r in conn.execute("SELECT id, name FROM professionals WHERE active = 1")
+        (r["id"], r["name"])
+        for r in conn.execute(
+            "SELECT id, name FROM professionals WHERE business_id = ? AND active = 1", (business_id,)
+        )
     ]
     return Catalog(services, professionals)
 

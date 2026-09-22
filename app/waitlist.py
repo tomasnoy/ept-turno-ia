@@ -29,6 +29,7 @@ class EntryNotWaiting(Exception):
 
 def add_entry(
     conn: sqlite3.Connection,
+    business_id: int,
     customer_id: int,
     service_id: int,
     professional_id: int | None,
@@ -38,9 +39,9 @@ def add_entry(
 ) -> tuple[int, bool]:
     """Devuelve (id, creada). Si ya estaba anotado para lo mismo, no duplica."""
     existing = conn.execute(
-        """SELECT id FROM waitlist WHERE status = 'waiting' AND customer_id = ? AND service_id = ?
-           AND day = ? AND part_of_day = ? AND professional_id IS ?""",
-        (customer_id, service_id, day.isoformat(), part_of_day, professional_id),
+        """SELECT id FROM waitlist WHERE status = 'waiting' AND business_id = ? AND customer_id = ?
+           AND service_id = ? AND day = ? AND part_of_day = ? AND professional_id IS ?""",
+        (business_id, customer_id, service_id, day.isoformat(), part_of_day, professional_id),
     ).fetchone()
     if existing:
         return existing["id"], False
@@ -50,15 +51,15 @@ def add_entry(
     if waiting >= MAX_WAITING_PER_CUSTOMER:
         raise WaitlistFull()
     cur = conn.execute(
-        """INSERT INTO waitlist (customer_id, service_id, professional_id, day, part_of_day, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (customer_id, service_id, professional_id, day.isoformat(), part_of_day, now.isoformat()),
+        """INSERT INTO waitlist (business_id, customer_id, service_id, professional_id, day, part_of_day, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (business_id, customer_id, service_id, professional_id, day.isoformat(), part_of_day, now.isoformat()),
     )
     conn.commit()
     return cur.lastrowid, True
 
 
-def _rows(conn: sqlite3.Connection, where: str, params: tuple) -> list[sqlite3.Row]:
+def _rows(conn: sqlite3.Connection, business_id: int, where: str, params: tuple) -> list[sqlite3.Row]:
     return conn.execute(
         f"""SELECT w.id, w.customer_id, w.service_id, w.professional_id, w.day, w.part_of_day,
                    w.created_at, c.name AS customer, c.phone AS phone, s.name AS service,
@@ -67,9 +68,9 @@ def _rows(conn: sqlite3.Connection, where: str, params: tuple) -> list[sqlite3.R
             JOIN customers c ON c.id = w.customer_id
             JOIN services s ON s.id = w.service_id
             LEFT JOIN professionals p ON p.id = w.professional_id
-            WHERE w.status = 'waiting' AND {where}
+            WHERE w.status = 'waiting' AND w.business_id = ? AND {where}
             ORDER BY w.created_at, w.id""",
-        params,
+        (business_id, *params),
     ).fetchall()
 
 
@@ -104,21 +105,23 @@ def _describe(conn, catalog, row: sqlite3.Row, now: datetime) -> dict:
     }
 
 
-def waiting_list(conn: sqlite3.Connection, now: datetime) -> list[dict]:
+def waiting_list(conn: sqlite3.Connection, business_id: int, now: datetime) -> list[dict]:
     """Quienes esperan de hoy en adelante, por orden de llegada, con los horarios que hoy les sirven."""
-    catalog = load_catalog(conn)
-    return [_describe(conn, catalog, r, now) for r in _rows(conn, "w.day >= ?", (now.date().isoformat(),))]
+    catalog = load_catalog(conn, business_id)
+    rows = _rows(conn, business_id, "w.day >= ?", (now.date().isoformat(),))
+    return [_describe(conn, catalog, r, now) for r in rows]
 
 
-def matches_for_day(conn: sqlite3.Connection, day: date, now: datetime) -> list[dict]:
+def matches_for_day(conn: sqlite3.Connection, business_id: int, day: date, now: datetime) -> list[dict]:
     """A quienes se les puede ofrecer un lugar de ese dia ahora mismo (tras una cancelacion)."""
-    catalog = load_catalog(conn)
-    described = [_describe(conn, catalog, r, now) for r in _rows(conn, "w.day = ?", (day.isoformat(),))]
+    catalog = load_catalog(conn, business_id)
+    rows = _rows(conn, business_id, "w.day = ?", (day.isoformat(),))
+    described = [_describe(conn, catalog, r, now) for r in rows]
     return [d for d in described if d["offers"]]
 
 
-def _get_waiting(conn: sqlite3.Connection, entry_id: int) -> sqlite3.Row:
-    row = conn.execute("SELECT * FROM waitlist WHERE id = ?", (entry_id,)).fetchone()
+def _get_waiting(conn: sqlite3.Connection, business_id: int, entry_id: int) -> sqlite3.Row:
+    row = conn.execute("SELECT * FROM waitlist WHERE id = ? AND business_id = ?", (entry_id, business_id)).fetchone()
     if row is None:
         raise EntryNotFound()
     if row["status"] != "waiting":
@@ -126,22 +129,22 @@ def _get_waiting(conn: sqlite3.Connection, entry_id: int) -> sqlite3.Row:
     return row
 
 
-def fulfill(conn: sqlite3.Connection, entry_id: int, professional_id: int, start: datetime) -> int:
+def fulfill(conn: sqlite3.Connection, business_id: int, entry_id: int, professional_id: int, start: datetime) -> int:
     """Le da el turno a quien esperaba. Levanta SlotUnavailable si el horario ya no esta libre."""
-    entry = _get_waiting(conn, entry_id)
+    entry = _get_waiting(conn, business_id, entry_id)
     if entry["professional_id"] not in (None, professional_id):
         raise scheduling.SlotUnavailable("El cliente pidio otro profesional")
     if start.date().isoformat() != entry["day"]:
         raise scheduling.SlotUnavailable("El cliente esta anotado para otro dia")
     appointment_id = scheduling.book(
-        conn, entry["customer_id"], professional_id, entry["service_id"], start, status="confirmed"
+        conn, business_id, entry["customer_id"], professional_id, entry["service_id"], start, status="confirmed"
     )
     conn.execute("UPDATE waitlist SET status = 'fulfilled' WHERE id = ?", (entry_id,))
     conn.commit()
     return appointment_id
 
 
-def remove(conn: sqlite3.Connection, entry_id: int) -> None:
-    _get_waiting(conn, entry_id)
+def remove(conn: sqlite3.Connection, business_id: int, entry_id: int) -> None:
+    _get_waiting(conn, business_id, entry_id)
     conn.execute("UPDATE waitlist SET status = 'removed' WHERE id = ?", (entry_id,))
     conn.commit()

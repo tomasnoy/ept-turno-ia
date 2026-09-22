@@ -3,21 +3,19 @@ import sqlite3
 import pytest
 
 from app import db
-from tests.conftest import CLAVE
 from tests.test_api import chat, usar_modelo
 
-HEADERS = {"X-Admin-Token": CLAVE}
 SABADO = "2026-09-26"  # atienden ambas profesionales de 09:00 a 14:00
 
 
 def llenar_sabado():
     """Ocupa todo el sabado de Laura y Martina. Devuelve los ids de los dos turnos."""
     conn = db.connect()
-    conn.execute("INSERT INTO customers (id, name, phone) VALUES (100, 'Cliente Ocupado', '11 0000-0000')")
+    conn.execute("INSERT INTO customers (id, business_id, name, phone) VALUES (100, 1, 'Cliente Ocupado', '11 0000-0000')")
     ids = [
         conn.execute(
-            "INSERT INTO appointments (customer_id, professional_id, service_id, start, end) "
-            "VALUES (100, ?, 1, ?, ?)",
+            "INSERT INTO appointments (business_id, customer_id, professional_id, service_id, start, end) "
+            "VALUES (1, 100, ?, 1, ?, ?)",
             (pro, f"{SABADO}T09:00:00", f"{SABADO}T14:00:00"),
         ).lastrowid
         for pro in (1, 2)
@@ -35,11 +33,11 @@ def anotarse(client, **overrides):
         "part_of_day": "any",
     }
     body.update(overrides)
-    return client.post("/api/waitlist", json=body)
+    return client.post(f"/api/b/{client.slug}/waitlist", json=body)
 
 
 def lista(client):
-    return client.get("/api/admin/waitlist", headers=HEADERS).json()["entries"]
+    return client.get("/api/admin/waitlist", headers=client.admin_headers).json()["entries"]
 
 
 # --- Chat: cuando ofrece anotarse -------------------------------------------------------------
@@ -57,11 +55,11 @@ def test_chat_ofrece_lista_de_espera_si_el_dia_esta_completo(client):
 
 def test_chat_ofrece_lista_de_espera_si_no_hay_lugar_en_la_franja(client):
     conn = db.connect()
-    conn.execute("INSERT INTO customers (id, name) VALUES (100, 'X')")
+    conn.execute("INSERT INTO customers (id, business_id, name) VALUES (100, 1, 'X')")
     for pro in (1, 2):  # ocupa solo la tarde del viernes
         conn.execute(
-            "INSERT INTO appointments (customer_id, professional_id, service_id, start, end) "
-            "VALUES (100, ?, 1, '2026-09-25T15:00:00', '2026-09-25T19:00:00')", (pro,))
+            "INSERT INTO appointments (business_id, customer_id, professional_id, service_id, start, end) "
+            "VALUES (1, 100, ?, 1, '2026-09-25T15:00:00', '2026-09-25T19:00:00')", (pro,))
     conn.commit()
     usar_modelo('{"action":"book","service":"Corte de pelo","day":"viernes","part_of_day":"afternoon"}')
     data = chat(client, "un corte el viernes a la tarde").json()
@@ -137,7 +135,7 @@ def test_cancelar_avisa_a_quien_esta_esperando(client):
     turnos = llenar_sabado()
     anotarse(client, customer_name="Lucía Gómez")
     anotarse(client, customer_name="Otro Dia", phone="11 4444-4444", day="2026-09-25")
-    resp = client.post(f"/api/admin/appointments/{turnos[0]}/cancel", headers=HEADERS).json()
+    resp = client.post(f"/api/admin/appointments/{turnos[0]}/cancel", headers=client.admin_headers).json()
     assert [m["customer"] for m in resp["waitlist_matches"]] == ["Lucía Gómez"]  # solo el del dia liberado
     ofertas = lista(client)[0]["offers"]
     assert ofertas and all(o["start"].startswith(SABADO) for o in ofertas)
@@ -146,31 +144,31 @@ def test_cancelar_avisa_a_quien_esta_esperando(client):
 
 def test_cancelar_sin_nadie_esperando_no_devuelve_coincidencias(client):
     turnos = llenar_sabado()
-    resp = client.post(f"/api/admin/appointments/{turnos[0]}/cancel", headers=HEADERS).json()
+    resp = client.post(f"/api/admin/appointments/{turnos[0]}/cancel", headers=client.admin_headers).json()
     assert resp["waitlist_matches"] == []
 
 
 def test_respeta_la_franja_y_el_profesional_pedidos(client):
     turnos = llenar_sabado()
     anotarse(client, customer_name="Quiere Martina", phone="11 5555-5555", professional_id=2)
-    client.post(f"/api/admin/appointments/{turnos[0]}/cancel", headers=HEADERS)  # se libera Laura
+    client.post(f"/api/admin/appointments/{turnos[0]}/cancel", headers=client.admin_headers)  # se libera Laura
     assert lista(client)[0]["offers"] == []  # Laura no le sirve
-    client.post(f"/api/admin/appointments/{turnos[1]}/cancel", headers=HEADERS)  # se libera Martina
+    client.post(f"/api/admin/appointments/{turnos[1]}/cancel", headers=client.admin_headers)  # se libera Martina
     assert lista(client)[0]["offers"]
 
 
 def test_dar_el_turno_reserva_y_saca_de_la_lista(client):
     turnos = llenar_sabado()
     anotarse(client)
-    client.post(f"/api/admin/appointments/{turnos[0]}/cancel", headers=HEADERS)
+    client.post(f"/api/admin/appointments/{turnos[0]}/cancel", headers=client.admin_headers)
     oferta = lista(client)[0]["offers"][0]
-    resp = client.post("/api/admin/waitlist/1/book", json=oferta_body(oferta), headers=HEADERS)
+    resp = client.post("/api/admin/waitlist/1/book", json=oferta_body(oferta), headers=client.admin_headers)
     assert resp.status_code == 200
     assert lista(client) == []
-    agenda = client.get(f"/api/admin/agenda?day={SABADO}", headers=HEADERS).json()["appointments"]
+    agenda = client.get(f"/api/admin/agenda?day={SABADO}", headers=client.admin_headers).json()["appointments"]
     assert any(a["customer"] == "Lucía Gómez" and a["status"] == "confirmed" for a in agenda)
     # no se le puede dar dos veces
-    assert client.post("/api/admin/waitlist/1/book", json=oferta_body(oferta), headers=HEADERS).status_code == 409
+    assert client.post("/api/admin/waitlist/1/book", json=oferta_body(oferta), headers=client.admin_headers).status_code == 409
 
 
 def oferta_body(oferta):
@@ -181,25 +179,25 @@ def test_no_se_puede_dar_un_horario_ocupado_ni_de_otro_dia(client):
     llenar_sabado()
     anotarse(client)
     ocupado = {"professional_id": 1, "start": f"{SABADO}T09:00:00"}
-    assert client.post("/api/admin/waitlist/1/book", json=ocupado, headers=HEADERS).status_code == 409
+    assert client.post("/api/admin/waitlist/1/book", json=ocupado, headers=client.admin_headers).status_code == 409
     otro_dia = {"professional_id": 1, "start": "2026-09-25T15:00:00"}
-    assert client.post("/api/admin/waitlist/1/book", json=otro_dia, headers=HEADERS).status_code == 409
+    assert client.post("/api/admin/waitlist/1/book", json=otro_dia, headers=client.admin_headers).status_code == 409
 
 
 def test_no_se_le_da_otro_profesional_al_que_pidio_uno(client):
     turnos = llenar_sabado()
     anotarse(client, professional_id=2)
-    client.post(f"/api/admin/appointments/{turnos[0]}/cancel", headers=HEADERS)  # libre Laura
+    client.post(f"/api/admin/appointments/{turnos[0]}/cancel", headers=client.admin_headers)  # libre Laura
     laura = {"professional_id": 1, "start": f"{SABADO}T09:00:00"}
-    assert client.post("/api/admin/waitlist/1/book", json=laura, headers=HEADERS).status_code == 409
+    assert client.post("/api/admin/waitlist/1/book", json=laura, headers=client.admin_headers).status_code == 409
 
 
 def test_quitar_de_la_lista(client):
     anotarse(client)
-    assert client.post("/api/admin/waitlist/1/remove", headers=HEADERS).status_code == 200
+    assert client.post("/api/admin/waitlist/1/remove", headers=client.admin_headers).status_code == 200
     assert lista(client) == []
-    assert client.post("/api/admin/waitlist/1/remove", headers=HEADERS).status_code == 409
-    assert client.post("/api/admin/waitlist/999/remove", headers=HEADERS).status_code == 404
+    assert client.post("/api/admin/waitlist/1/remove", headers=client.admin_headers).status_code == 409
+    assert client.post("/api/admin/waitlist/999/remove", headers=client.admin_headers).status_code == 404
     assert anotarse(client).json()["created"] is True  # puede volver a anotarse
 
 

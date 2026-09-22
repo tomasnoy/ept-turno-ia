@@ -117,6 +117,12 @@
   .hours-day { display: grid; grid-template-columns: 90px 1fr auto; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
   .hours-day input[type=text] { min-height: 40px; }
   .hint { color: var(--muted); font-size: .85rem; margin: 2px 0 0; }
+  .plan-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 10px 0; }
+  .plan-card { border: 1.5px solid var(--line); border-radius: 14px; padding: 14px; background: var(--card); }
+  .plan-card h3 { margin: 0 0 4px; font-size: 1rem; }
+  .plan-card p { margin: 0 0 10px; color: var(--muted); font-size: .88rem; }
+  .plan-card[data-current="true"] { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+  .plan-card button { width: 100%; }
   [hidden] { display: none !important; }
 </style>
 </head>
@@ -124,13 +130,16 @@
 
 <section id="login" hidden>
   <h1>Panel del negocio</h1>
-  <p>Ingresá tu clave para ver las reservas.</p>
+  <p>Ingresá con el email y la clave de tu negocio.</p>
   <form id="loginForm">
-    <div><label for="key">Clave de acceso</label>
-      <input id="key" type="password" autocomplete="current-password" required style="width:100%"></div>
+    <div><label for="loginEmail">Email</label>
+      <input id="loginEmail" type="email" autocomplete="username" required style="width:100%"></div>
+    <div><label for="loginPassword">Clave</label>
+      <input id="loginPassword" type="password" autocomplete="current-password" required style="width:100%"></div>
     <p class="error" id="loginError" role="alert"></p>
     <button class="primary" type="submit">Ingresar</button>
   </form>
+  <p style="margin-top:14px"><a href="/registro">¿Todavía no tenés cuenta? Registrá tu negocio</a></p>
 </section>
 
 <div class="wrap" id="app" hidden>
@@ -174,11 +183,20 @@
 
   <section id="configView" hidden>
     <div class="config-section">
+      <h2>Tu plan</h2>
+      <p id="planSummary">Cargando…</p>
+      <div class="plan-grid" id="planGrid"></div>
+      <p class="hint">Cambiar de plan en esta demo no genera ningún cobro real.</p>
+    </div>
+
+    <div class="config-section">
       <h2>Datos del negocio</h2>
-      <p>Nombre y mensaje de bienvenida que ve el cliente al abrir el chat.</p>
+      <p>Nombre, logo y colores que ve el cliente en su página de reservas: <a id="publicLink" target="_blank" rel="noopener"></a></p>
       <form class="config-form" id="settingsForm">
         <div><label for="cfgName">Nombre del negocio</label><input id="cfgName" type="text" maxlength="80" required></div>
         <div><label for="cfgWelcome">Mensaje de bienvenida</label><input id="cfgWelcome" type="text" maxlength="300" required></div>
+        <div><label for="cfgLogo">URL del logo (opcional)</label><input id="cfgLogo" type="url" maxlength="500" placeholder="https://..."></div>
+        <div><label for="cfgColor">Color principal</label><input id="cfgColor" type="color" style="max-width:80px"></div>
         <div><button class="primary" type="submit">Guardar</button></div>
       </form>
     </div>
@@ -223,10 +241,10 @@
 
 <script>
   const $ = (id) => document.getElementById(id);
-  const store = { get: () => { try { return sessionStorage.getItem("adminKey"); } catch (_) { return null; } },
-                  set: (v) => { try { sessionStorage.setItem("adminKey", v); } catch (_) {} },
-                  clear: () => { try { sessionStorage.removeItem("adminKey"); } catch (_) {} } };
-  let key = store.get();
+  const store = { get: () => { try { return sessionStorage.getItem("sessionToken"); } catch (_) { return null; } },
+                  set: (v) => { try { sessionStorage.setItem("sessionToken", v); } catch (_) {} },
+                  clear: () => { try { sessionStorage.removeItem("sessionToken"); } catch (_) {} } };
+  let token = store.get();
   let day = null, today = null, data = null, timer = null, waiting = [];
 
   function el(tag, cls, text) { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; }
@@ -239,7 +257,7 @@
   }
 
   async function api(path, method = "GET", payload) {
-    const headers = { "X-Admin-Token": key || "" };
+    const headers = { "X-Session-Token": token || "" };
     if (payload) headers["Content-Type"] = "application/json";
     const resp = await fetch(path, { method, headers, body: payload ? JSON.stringify(payload) : undefined });
     let body = {};
@@ -249,16 +267,16 @@
   }
 
   function showLogin(msg = "") {
-    clearInterval(timer); store.clear(); key = null;
-    $("app").hidden = true; $("login").hidden = false; $("loginError").textContent = msg; $("key").value = ""; $("key").focus();
+    clearInterval(timer); store.clear(); token = null;
+    $("app").hidden = true; $("login").hidden = false; $("loginError").textContent = msg;
+    $("loginPassword").value = ""; $("loginEmail").focus();
   }
 
   async function load(target) {
     try {
       data = await api("/api/admin/agenda" + (target ? `?day=${target}` : ""));
     } catch (err) {
-      if (err.status === 401) return showLogin("La sesión venció o la clave es incorrecta.");
-      if (err.status === 429 || err.status === 503) return showLogin(err.message);
+      if (err.status === 401) return showLogin("La sesión venció. Iniciá sesión de nuevo.");
       toast(err.message); return;
     }
     day = data.day; today = data.upcoming[0].day;
@@ -454,14 +472,14 @@
   async function loadConfig() {
     configLoaded = true;
     try {
-      const [s, services, professionals, hours] = await Promise.all([
-        api("/api/admin/settings"),
+      const [business, services, professionals, hours] = await Promise.all([
+        api("/api/admin/business"),
         api("/api/admin/services"),
         api("/api/admin/professionals"),
         api("/api/admin/working-hours"),
       ]);
-      $("cfgName").value = s.business_name;
-      $("cfgWelcome").value = s.welcome_message;
+      fillSettingsForm(business);
+      renderPlan(business);
       renderServices(services.services);
       renderProfessionals(professionals.professionals);
       hoursData = hours;
@@ -471,14 +489,62 @@
     }
   }
 
+  function fillSettingsForm(b) {
+    $("cfgName").value = b.name;
+    $("cfgWelcome").value = b.welcome_message;
+    $("cfgLogo").value = b.logo_url || "";
+    $("cfgColor").value = b.color_primary || "#7a3e65";
+  }
+
   $("settingsForm").addEventListener("submit", async (e) => {
     e.preventDefault();
     try {
-      await api("/api/admin/settings", "PUT", { business_name: $("cfgName").value, welcome_message: $("cfgWelcome").value });
+      await api("/api/admin/business", "PUT", {
+        name: $("cfgName").value,
+        welcome_message: $("cfgWelcome").value,
+        logo_url: $("cfgLogo").value || null,
+        color_primary: $("cfgColor").value || null,
+      });
       toast("Datos del negocio guardados.");
       refreshBusinessName();
     } catch (err) { toast(err.message); }
   });
+
+  const PLAN_INFO = {
+    basico: { label: "Básico", price: "Gratis", desc: "1 profesional, agenda y lista de espera." },
+    pro: { label: "Pro", price: "$9.990/mes", desc: "Hasta 5 profesionales, misma agenda." },
+    premium: { label: "Premium", price: "$19.990/mes", desc: "Profesionales ilimitados." },
+  };
+
+  function renderPlan(business) {
+    const limit = business.professional_limit;
+    $("planSummary").textContent = `Plan actual: ${PLAN_INFO[business.plan].label}` +
+      (limit ? ` · hasta ${limit} profesional${limit === 1 ? "" : "es"}` : " · profesionales ilimitados");
+    const grid = $("planGrid"); grid.replaceChildren();
+    Object.entries(PLAN_INFO).forEach(([id, info]) => {
+      const card = el("div", "plan-card");
+      card.dataset.current = String(id === business.plan);
+      card.append(el("h3", "", `${info.label} · ${info.price}`), el("p", "", info.desc));
+      if (id === business.plan) {
+        const current = el("button", "ghost", "Plan actual"); current.disabled = true;
+        card.appendChild(current);
+      } else {
+        const btn = el("button", "primary", id === "basico" ? "Bajar a Básico" : `Pasar a ${info.label}`);
+        btn.type = "button";
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          try {
+            const updated = await api("/api/admin/plan", "PUT", { plan: id });
+            toast(`Ahora estás en el plan ${PLAN_INFO[updated.plan].label}.`);
+            renderPlan(updated);
+          } catch (err) { toast(err.message); }
+          btn.disabled = false;
+        });
+        card.appendChild(btn);
+      }
+      grid.appendChild(card);
+    });
+  }
 
   function renderServices(services) {
     const tbody = $("servicesTable").querySelector("tbody");
@@ -613,8 +679,9 @@
 
   async function refreshBusinessName() {
     try {
-      const b = await fetch("/api/business").then((r) => r.json());
+      const b = await api("/api/admin/business");
       $("business").firstChild.textContent = b.name; document.title = `Panel · ${b.name}`;
+      const link = $("publicLink"); link.href = `/b/${b.slug}`; link.textContent = `${location.origin}/b/${b.slug}`;
     } catch (_) {}
   }
 
@@ -622,11 +689,16 @@
   $("tabConfig").addEventListener("click", () => switchTab("config"));
 
   $("loginForm").addEventListener("submit", async (e) => {
-    e.preventDefault(); key = $("key").value; $("loginError").textContent = "";
-    try { await api("/api/admin/check"); store.set(key); start(); }
-    catch (err) { key = null; $("loginError").textContent = err.message; }
+    e.preventDefault(); $("loginError").textContent = "";
+    try {
+      const r = await api("/api/login", "POST", { email: $("loginEmail").value, password: $("loginPassword").value });
+      token = r.session_token; store.set(token); start();
+    } catch (err) { token = null; $("loginError").textContent = err.message; }
   });
-  $("logout").addEventListener("click", () => showLogin());
+  $("logout").addEventListener("click", async () => {
+    try { await api("/api/logout", "POST"); } catch (_) {}
+    showLogin();
+  });
   $("prev").addEventListener("click", () => shift(-1));
   $("next").addEventListener("click", () => shift(1));
   $("today").addEventListener("click", () => load(today));
@@ -636,13 +708,12 @@
 
   function start() {
     load();
+    refreshBusinessName();
     clearInterval(timer);
     timer = setInterval(() => { if (!document.hidden && day && !document.querySelector('[data-confirming]')) load(day); }, 60000);  // nuevas reservas sin recargar
   }
 
-  refreshBusinessName();
-
-  if (key) start(); else showLogin();
+  if (token) start(); else showLogin();
 </script>
 </body>
 </html>

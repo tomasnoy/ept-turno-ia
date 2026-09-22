@@ -167,12 +167,13 @@ def find_options(conn, catalog, service_id, professional_id, day, part, exact, n
 def handle_message(
     conn: sqlite3.Connection,
     provider: LLMProvider,
+    business_id: int,
     message: str,
     ctx: Context,
     now: datetime,
 ) -> ChatResult:
     today = now.date()
-    catalog = load_catalog(conn)
+    catalog = load_catalog(conn, business_id)
     ctx = sanitize_context(ctx, catalog, today)
     intent: Intent = interpret(message, catalog, today, provider)
 

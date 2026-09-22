@@ -11,10 +11,14 @@ LUNES = date(2026, 9, 21)  # weekday() == 0
 def conn():
     c = db.connect(":memory:")
     db.init_db(c)
-    c.execute("INSERT INTO services (id, name, duration_min) VALUES (1, 'Corte', 60)")
-    c.execute("INSERT INTO professionals (id, name) VALUES (1, 'Laura')")
-    c.execute("INSERT INTO working_hours VALUES (1, 0, '09:00', '12:00')")
-    c.execute("INSERT INTO customers (id, name) VALUES (1, 'Ana')")
+    c.execute(
+        "INSERT INTO businesses (id, slug, name, email, password_hash, created_at) "
+        "VALUES (1, 'demo', 'Demo', 'demo@x.com', 'x', '2026-01-01')"
+    )
+    c.execute("INSERT INTO services (id, business_id, name, duration_min) VALUES (1, 1, 'Corte', 60)")
+    c.execute("INSERT INTO professionals (id, business_id, name) VALUES (1, 1, 'Laura')")
+    c.execute("INSERT INTO working_hours (business_id, professional_id, weekday, start, end) VALUES (1, 1, 0, '09:00', '12:00')")
+    c.execute("INSERT INTO customers (id, business_id, name) VALUES (1, 1, 'Ana')")
     c.commit()
     return c
 
@@ -30,7 +34,7 @@ def test_dia_sin_atencion_no_tiene_slots(conn):
 
 
 def test_book_bloquea_horarios_superpuestos(conn):
-    scheduling.book(conn, 1, 1, 1, datetime(2026, 9, 21, 10, 0))
+    scheduling.book(conn, 1, 1, 1, 1, datetime(2026, 9, 21, 10, 0))
     slots = scheduling.free_slots(conn, 1, 1, LUNES)
     assert datetime(2026, 9, 21, 10, 0) not in slots
     assert datetime(2026, 9, 21, 10, 30) not in slots
@@ -40,18 +44,18 @@ def test_book_bloquea_horarios_superpuestos(conn):
 
 
 def test_book_falla_si_el_horario_esta_ocupado(conn):
-    scheduling.book(conn, 1, 1, 1, datetime(2026, 9, 21, 10, 0))
+    scheduling.book(conn, 1, 1, 1, 1, datetime(2026, 9, 21, 10, 0))
     with pytest.raises(scheduling.SlotUnavailable):
-        scheduling.book(conn, 1, 1, 1, datetime(2026, 9, 21, 10, 0))
+        scheduling.book(conn, 1, 1, 1, 1, datetime(2026, 9, 21, 10, 0))
 
 
 def test_book_falla_fuera_de_horario(conn):
     with pytest.raises(scheduling.SlotUnavailable):
-        scheduling.book(conn, 1, 1, 1, datetime(2026, 9, 21, 20, 0))
+        scheduling.book(conn, 1, 1, 1, 1, datetime(2026, 9, 21, 20, 0))
 
 
 def test_cancelar_libera_el_horario(conn):
-    turno = scheduling.book(conn, 1, 1, 1, datetime(2026, 9, 21, 10, 0))
+    turno = scheduling.book(conn, 1, 1, 1, 1, datetime(2026, 9, 21, 10, 0))
     scheduling.cancel(conn, turno)
     assert datetime(2026, 9, 21, 10, 0) in scheduling.free_slots(conn, 1, 1, LUNES)
 

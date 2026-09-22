@@ -65,6 +65,7 @@ def free_slots(
 
 def book(
     conn: sqlite3.Connection,
+    business_id: int,
     customer_id: int,
     professional_id: int,
     service_id: int,
@@ -81,9 +82,9 @@ def book(
         raise SlotUnavailable(f"{start.isoformat()} no esta disponible")
     end = start + timedelta(minutes=_service_duration(conn, service_id))
     cur = conn.execute(
-        """INSERT INTO appointments (customer_id, professional_id, service_id, start, end, status)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (customer_id, professional_id, service_id, start.isoformat(), end.isoformat(), status),
+        """INSERT INTO appointments (business_id, customer_id, professional_id, service_id, start, end, status)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (business_id, customer_id, professional_id, service_id, start.isoformat(), end.isoformat(), status),
     )
     conn.commit()
     return cur.lastrowid

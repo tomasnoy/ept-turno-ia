@@ -22,7 +22,8 @@
          font: 17px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
   .app { max-width: 640px; margin: 0 auto; min-height: 100dvh; display: flex; flex-direction: column;
          padding: 0 16px; }
-  header { padding: 20px 0 8px; }
+  header { padding: 20px 0 8px; display: flex; align-items: center; gap: 12px; }
+  header .logo { width: 44px; height: 44px; border-radius: 10px; object-fit: cover; flex: 0 0 auto; }
   h1 { margin: 0; font-size: 1.35rem; }
   header p { margin: 4px 0 0; color: var(--muted); font-size: .95rem; }
   #log { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 12px 0; }
@@ -75,8 +76,11 @@
 <body>
 <div class="app">
   <header>
-    <h1 id="business">Reservá tu turno</h1>
-    <p>Escribí qué necesitás con tus palabras y te muestro los horarios libres.</p>
+    <img id="logo" class="logo" alt="" hidden>
+    <div>
+      <h1 id="business">Reservá tu turno</h1>
+      <p>Escribí qué necesitás con tus palabras y te muestro los horarios libres.</p>
+    </div>
   </header>
 
   <main id="log" aria-live="polite" aria-label="Conversación"></main>
@@ -98,6 +102,9 @@
   const sendBtn = document.getElementById("send");
   let context = {};
   let busy = false;
+
+  const SLUG = decodeURIComponent(location.pathname.replace(/^\/b\//, "").replace(/\/$/, "")) || "demo";
+  const API_BASE = `/api/b/${SLUG}`;
 
   const WEEKDAYS_ES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
   function dayLabel(iso) {
@@ -146,7 +153,7 @@
     setBusy(true);
     const status = say("Buscando horarios…", "status");
     try {
-      const data = await api("/api/chat", { message: text, context });
+      const data = await api(`${API_BASE}/chat`, { message: text, context });
       status.remove();
       context = data.context;
       const bubble = say(data.reply);
@@ -212,7 +219,7 @@
     try {
       const params = new URLSearchParams({ service_id: ctx.service_id, day: iso });
       if (ctx.professional_id) params.set("professional_id", ctx.professional_id);
-      const data = await api(`/api/slots?${params.toString()}`);
+      const data = await api(`${API_BASE}/slots?${params.toString()}`);
       timesBox.innerHTML = "";
       renderTimes(timesBox, data.options, null, iso);
     } catch (err) {
@@ -272,7 +279,7 @@
       const submit = f.querySelector("button[type=submit]");
       submit.disabled = true; submit.textContent = "Anotando…";
       try {
-        const data = await api("/api/waitlist", {
+        const data = await api(`${API_BASE}/waitlist`, {
           customer_name: f.name.value, phone: f.phone.value,
           service_id: offer.service_id, professional_id: offer.professional_id,
           day: offer.day, part_of_day: offer.part_of_day,
@@ -307,7 +314,7 @@
       const submit = f.querySelector("button[type=submit]");
       submit.disabled = true; submit.textContent = "Confirmando…";
       try {
-        const data = await api("/api/book", {
+        const data = await api(`${API_BASE}/book`, {
           customer_name: f.name.value, phone: f.phone.value || null,
           professional_id: opt.professional_id, service_id: context.service_id, start: opt.start,
         });
@@ -335,11 +342,18 @@
     chips.appendChild(c);
   });
 
-  api("/api/business").then((b) => {
+  api(`${API_BASE}/business`).then((b) => {
     document.getElementById("business").textContent = b.name;
     document.title = `Reservá tu turno · ${b.name}`;
+    if (b.color_primary) document.documentElement.style.setProperty("--accent", b.color_primary);
+    if (b.logo_url) {
+      const logo = document.getElementById("logo");
+      logo.src = b.logo_url; logo.alt = b.name; logo.hidden = false;
+    }
     say(b.welcome_message);
-  }).catch(() => say("No pude conectarme con el servidor. Recargá la página en unos segundos.", "error"));
+  }).catch((err) => {
+    say(err.status === 404 ? "Este negocio no existe o cambió de dirección." : "No pude conectarme con el servidor. Recargá la página en unos segundos.", "error");
+  });
 </script>
 </body>
 </html>
