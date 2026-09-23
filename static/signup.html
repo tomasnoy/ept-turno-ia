@@ -26,8 +26,8 @@
   form { display: flex; flex-direction: column; gap: 14px; background: var(--card); padding: 22px;
          border-radius: 16px; border: 1px solid var(--line); }
   label { font-size: .9rem; color: var(--muted); display: block; margin-bottom: 4px; }
-  input { font: inherit; width: 100%; padding: 12px; border-radius: 10px; border: 1.5px solid var(--line);
-          background: var(--bg); color: var(--ink); min-height: 48px; }
+  input { display: block; font: inherit; width: 100%; padding: 12px; border-radius: 10px; border: 1.5px solid var(--line);
+          background: var(--bg); color: var(--ink); min-height: 48px; margin: 0; }
   .plan-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .plan-option { border: 1.5px solid var(--line); border-radius: 10px; padding: 10px 6px; text-align: center;
                  background: var(--bg); cursor: pointer; font-size: .88rem; }
@@ -39,7 +39,7 @@
                    padding: 12px 18px; min-height: 48px; font-weight: 600; font: inherit; cursor: pointer; }
   button:disabled { opacity: .6; cursor: not-allowed; }
   .error { color: var(--danger); margin: 0; min-height: 1.3em; font-size: .92rem; }
-  .hint { font-size: .82rem; color: var(--muted); margin: -6px 0 0; }
+  .hint { display: block; font-size: .82rem; color: var(--muted); margin: 4px 0 0; }
 </style>
 </head>
 <body>
@@ -48,10 +48,12 @@
   <h1>Registrá tu negocio</h1>
   <p class="sub">Creá tu cuenta y en un minuto tenés tu propia página de reservas.</p>
   <form id="signupForm">
-    <div><label for="name">Nombre del negocio</label><input id="name" type="text" minlength="2" maxlength="80" required></div>
-    <div><label for="email">Email</label><input id="email" type="email" required></div>
-    <div><label for="password">Clave</label><input id="password" type="password" minlength="8" required>
-      <p class="hint">Mínimo 8 caracteres.</p></div>
+    <div><label for="name">Nombre del negocio</label><input id="name" type="text" minlength="2" maxlength="80" required>
+      <p class="hint">Máximo 80 caracteres. Define la URL de tu página de reservas.</p></div>
+    <div><label for="email">Email</label><input id="email" type="email" maxlength="120" required></div>
+    <div><label for="password">Clave</label><input id="password" type="password" minlength="8" maxlength="50" required>
+      <p class="hint">Entre 8 y 50 caracteres.</p></div>
+    <div><label for="confirmPassword">Repetí la clave</label><input id="confirmPassword" type="password" minlength="8" maxlength="50" required></div>
     <div>
       <label>Plan</label>
       <div class="plan-options" id="planOptions"></div>
@@ -85,6 +87,12 @@
     e.preventDefault();
     const errorEl = document.getElementById("signupError");
     errorEl.textContent = "";
+    const password = document.getElementById("password").value;
+    const confirmPassword = document.getElementById("confirmPassword").value;
+    if (password !== confirmPassword) {
+      errorEl.textContent = "Las claves no coinciden.";
+      return;
+    }
     const submit = e.target.querySelector("button[type=submit]");
     submit.disabled = true; submit.textContent = "Creando…";
     try {
@@ -92,9 +100,10 @@
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          business_name: document.getElementById("name").value,
-          email: document.getElementById("email").value,
-          password: document.getElementById("password").value,
+          business_name: document.getElementById("name").value.trim(),
+          email: document.getElementById("email").value.trim(),
+          password,
+          confirm_password: confirmPassword,
           plan: selectedPlan,
         }),
       });

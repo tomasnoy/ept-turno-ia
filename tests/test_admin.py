@@ -189,7 +189,13 @@ def test_no_se_puede_bajar_de_plan_si_sobran_profesionales(client):
 def test_limite_de_profesionales_del_plan_basico(client):
     signup = client.post(
         "/api/signup",
-        json={"business_name": "Nuevo Negocio", "email": "nuevo@x.com", "password": "clave1234", "plan": "basico"},
+        json={
+            "business_name": "Nuevo Negocio",
+            "email": "nuevo@x.com",
+            "password": "clave1234",
+            "confirm_password": "clave1234",
+            "plan": "basico",
+        },
     ).json()
     headers = {"X-Session-Token": signup["session_token"]}
     assert client.post("/api/admin/professionals", json={"name": "Primera"}, headers=headers).status_code == 200
@@ -201,7 +207,12 @@ def test_limite_de_profesionales_del_plan_basico(client):
 def test_limite_basico_resiste_creaciones_concurrentes(client):
     signup = client.post(
         "/api/signup",
-        json={"business_name": "Negocio Carrera", "email": "race@x.com", "password": "clave1234"},
+        json={
+            "business_name": "Negocio Carrera",
+            "email": "race@x.com",
+            "password": "clave1234",
+            "confirm_password": "clave1234",
+        },
     ).json()
     headers = {"X-Session-Token": signup["session_token"]}
 
@@ -270,6 +281,24 @@ def test_crear_y_editar_servicio(client):
     ).status_code == 404
 
 
+def test_eliminar_servicio(client):
+    creado = client.post(
+        "/api/admin/services", json={"name": "Manicura", "duration_min": 30}, headers=client.admin_headers
+    ).json()
+    assert client.delete(f"/api/admin/services/{creado['id']}", headers=client.admin_headers).status_code == 200
+    nombres = {s["name"] for s in client.get("/api/admin/services", headers=client.admin_headers).json()["services"]}
+    assert "Manicura" not in nombres
+    assert client.delete("/api/admin/services/999", headers=client.admin_headers).status_code == 404
+
+
+def test_no_se_puede_eliminar_servicio_con_turnos(client):
+    reservar(client)  # usa service_id=1
+    resp = client.delete("/api/admin/services/1", headers=client.admin_headers)
+    assert resp.status_code == 409
+    nombres = {s["name"] for s in client.get("/api/admin/services", headers=client.admin_headers).json()["services"]}
+    assert "Corte de pelo" in nombres
+
+
 def test_servicio_desactivado_no_se_ofrece_en_el_chat(client):
     client.put(
         "/api/admin/services/1",
@@ -290,6 +319,31 @@ def test_crear_y_editar_profesional(client):
     assert client.put(
         "/api/admin/professionals/999", json={"name": "XX"}, headers=client.admin_headers
     ).status_code == 404
+
+
+def test_eliminar_profesional(client):
+    creado = client.post("/api/admin/professionals", json={"name": "Sofía"}, headers=client.admin_headers).json()
+    client.put(
+        "/api/admin/working-hours",
+        json={"professional_id": creado["id"], "weekday": 0, "ranges": [{"start": "09:00", "end": "13:00"}]},
+        headers=client.admin_headers,
+    )
+    assert client.delete(f"/api/admin/professionals/{creado['id']}", headers=client.admin_headers).status_code == 200
+    nombres = {
+        p["name"] for p in client.get("/api/admin/professionals", headers=client.admin_headers).json()["professionals"]
+    }
+    assert "Sofía" not in nombres
+    assert client.delete("/api/admin/professionals/999", headers=client.admin_headers).status_code == 404
+
+
+def test_no_se_puede_eliminar_profesional_con_turnos(client):
+    reservar(client, professional_id=1)
+    resp = client.delete("/api/admin/professionals/1", headers=client.admin_headers)
+    assert resp.status_code == 409
+    nombres = {
+        p["name"] for p in client.get("/api/admin/professionals", headers=client.admin_headers).json()["professionals"]
+    }
+    assert "Laura" in nombres
 
 
 # --- Configuracion: horarios ----------------------------------------------------------------------

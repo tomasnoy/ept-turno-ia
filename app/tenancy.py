@@ -16,6 +16,13 @@ PLANS = ("basico", "pro", "premium")
 PLAN_LABELS = {"basico": "Básico", "pro": "Pro", "premium": "Premium"}
 # Limite de profesionales por plan. None = sin limite.
 PLAN_PROFESSIONAL_LIMITS: dict[str, int | None] = {"basico": 1, "pro": 5, "premium": None}
+SLUG_MAX_LEN = 60
+MAX_EXAMPLE_PROMPTS = 3
+DEFAULT_EXAMPLE_PROMPTS = [
+    "Quiero reservar un turno para mañana",
+    "¿Qué turnos hay para el viernes?",
+    "Necesito un turno para el sábado a la mañana",
+]
 
 
 class EmailTaken(Exception):
@@ -26,6 +33,7 @@ def _slugify(name: str) -> str:
     stripped = unicodedata.normalize("NFD", name)
     ascii_only = "".join(c for c in stripped if unicodedata.category(c) != "Mn")
     slug = re.sub(r"[^a-z0-9]+", "-", ascii_only.lower()).strip("-")
+    slug = slug[:SLUG_MAX_LEN].strip("-")
     return slug or "negocio"
 
 
@@ -40,6 +48,8 @@ def _unique_slug(conn: sqlite3.Connection, name: str) -> str:
 
 
 def to_public(row: sqlite3.Row) -> dict:
+    raw_prompts = row["example_prompts"] if "example_prompts" in row.keys() else None
+    example_prompts = [p for p in raw_prompts.split("\n") if p] if raw_prompts else DEFAULT_EXAMPLE_PROMPTS
     return {
         "id": row["id"],
         "slug": row["slug"],
@@ -48,6 +58,7 @@ def to_public(row: sqlite3.Row) -> dict:
         "welcome_message": row["welcome_message"] or f"¡Hola! Soy el asistente de {row['name']}. Contame qué servicio querés y para cuándo.",
         "logo_url": row["logo_url"],
         "color_primary": row["color_primary"] or "#7a3e65",
+        "example_prompts": example_prompts,
         "professional_limit": PLAN_PROFESSIONAL_LIMITS[row["plan"]],
     }
 
@@ -92,10 +103,13 @@ def update_branding(
     welcome_message: str | None,
     logo_url: str | None,
     color_primary: str | None,
+    example_prompts: list[str] | None = None,
 ) -> None:
+    prompts_value = "\n".join(example_prompts) if example_prompts else None
     conn.execute(
-        "UPDATE businesses SET name = ?, welcome_message = ?, logo_url = ?, color_primary = ? WHERE id = ?",
-        (name, welcome_message, logo_url, color_primary, business_id),
+        "UPDATE businesses SET name = ?, welcome_message = ?, logo_url = ?, color_primary = ?, example_prompts = ? "
+        "WHERE id = ?",
+        (name, welcome_message, logo_url, color_primary, prompts_value, business_id),
     )
     conn.commit()
 

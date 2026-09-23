@@ -18,21 +18,35 @@ EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 class SignupIn(BaseModel):
     business_name: str = Field(min_length=2, max_length=80)
     email: str = Field(min_length=3, max_length=120)
-    password: str = Field(min_length=8, max_length=100)
+    password: str = Field(min_length=8, max_length=50)
+    confirm_password: str = Field(min_length=8, max_length=50)
     plan: str = "basico"
+
+    @field_validator("business_name")
+    @classmethod
+    def _clean_name(cls, value: str) -> str:
+        return value.strip()
 
     @field_validator("email")
     @classmethod
     def _valid_email(cls, value: str) -> str:
+        value = value.strip().lower()
         if not EMAIL_RE.fullmatch(value):
             raise ValueError("Ese email no parece válido.")
-        return value.lower()
+        return value
 
     @field_validator("plan")
     @classmethod
     def _valid_plan(cls, value: str) -> str:
         if value not in tenancy.PLANS:
             raise ValueError(f"Plan inválido: {value}")
+        return value
+
+    @field_validator("confirm_password")
+    @classmethod
+    def _passwords_match(cls, value: str, info) -> str:
+        if "password" in info.data and value != info.data["password"]:
+            raise ValueError("Las claves no coinciden.")
         return value
 
 
@@ -54,8 +68,13 @@ def signup(
 
 
 class LoginIn(BaseModel):
-    email: str
-    password: str
+    email: str = Field(min_length=3, max_length=120)
+    password: str = Field(min_length=1, max_length=100)
+
+    @field_validator("email")
+    @classmethod
+    def _clean_email(cls, value: str) -> str:
+        return value.strip().lower()
 
 
 @router.post("/login")

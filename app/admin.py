@@ -27,6 +27,7 @@ def check(business_id: int = Depends(require_business)) -> dict:
 @router.get("/agenda")
 def agenda(
     day: date | None = None,
+    month: str | None = None,
     business_id: int = Depends(require_business),
     conn: sqlite3.Connection = Depends(get_conn),
     now: datetime = Depends(get_now),
@@ -58,10 +59,39 @@ def agenda(
         {"day": (d := (today + timedelta(days=i)).date()).isoformat(), "count": by_day.get(d.isoformat(), 0)}
         for i in range(UPCOMING_DAYS)
     ]
+
+    if month:
+        try:
+            month_year, month_num = (int(p) for p in month.split("-"))
+            first = date(month_year, month_num, 1)
+        except (ValueError, TypeError):
+            raise HTTPException(400, "Mes inválido. Usá el formato YYYY-MM.")
+    else:
+        month_year, month_num, first = day.year, day.month, date(day.year, day.month, 1)
+    last = date(month_year + month_num // 12, month_num % 12 + 1, 1) - timedelta(days=1)
+    month_rows = conn.execute(
+        """SELECT substr(start, 1, 10) AS day, COUNT(*) AS n FROM appointments
+           WHERE business_id = ? AND status IN ('confirmed', 'pending') AND start >= ? AND start < ?
+           GROUP BY day""",
+        (
+            business_id,
+            datetime(first.year, first.month, first.day).isoformat(),
+            (datetime(last.year, last.month, last.day) + timedelta(days=1)).isoformat(),
+        ),
+    ).fetchall()
+    month_by_day = {r["day"]: r["n"] for r in month_rows}
+    month_days = []
+    cursor = first
+    while cursor <= last:
+        month_days.append({"day": cursor.isoformat(), "count": month_by_day.get(cursor.isoformat(), 0)})
+        cursor += timedelta(days=1)
+
     return {
         "day": day.isoformat(),
         "appointments": [dict(r) for r in rows],
         "upcoming": upcoming,
+        "month": f"{month_year:04d}-{month_num:02d}",
+        "month_days": month_days,
     }
 
 
@@ -159,6 +189,7 @@ class BrandingIn(BaseModel):
     welcome_message: str | None = Field(default=None, min_length=1, max_length=300)
     logo_url: str | None = Field(default=None, max_length=500)
     color_primary: str | None = Field(default=None, pattern=r"^#[0-9a-fA-F]{6}$")
+    example_prompts: list[str] | None = Field(default=None, max_length=tenancy.MAX_EXAMPLE_PROMPTS)
 
     @field_validator("logo_url")
     @classmethod
@@ -169,6 +200,17 @@ class BrandingIn(BaseModel):
         if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
             raise ValueError("El logo debe ser una URL HTTPS válida y sin credenciales.")
         return value
+
+    @field_validator("example_prompts")
+    @classmethod
+    def _clean_prompts(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        cleaned = [p.strip() for p in value if p.strip()]
+        for p in cleaned:
+            if not (2 <= len(p) <= 120):
+                raise ValueError("Cada ejemplo debe tener entre 2 y 120 caracteres.")
+        return cleaned or None
 
 
 @router.get("/business")
@@ -181,7 +223,9 @@ def get_business(business_id: int = Depends(require_business), conn: sqlite3.Con
 def put_business(
     body: BrandingIn, business_id: int = Depends(require_business), conn: sqlite3.Connection = Depends(get_conn)
 ) -> dict:
-    tenancy.update_branding(conn, business_id, body.name, body.welcome_message, body.logo_url, body.color_primary)
+    tenancy.update_branding(
+        conn, business_id, body.name, body.welcome_message, body.logo_url, body.color_primary, body.example_prompts
+    )
     return tenancy.to_public(tenancy.get_by_id(conn, business_id))
 
 
@@ -278,6 +322,23 @@ def update_service(
     return _service_row(row)
 
 
+@router.delete("/services/{service_id}")
+def delete_service(
+    service_id: int, business_id: int = Depends(require_business), conn: sqlite3.Connection = Depends(get_conn)
+) -> dict:
+    if conn.execute(
+        "SELECT 1 FROM services WHERE id = ? AND business_id = ?", (service_id, business_id)
+    ).fetchone() is None:
+        raise HTTPException(404, "El servicio no existe.")
+    try:
+        conn.execute("DELETE FROM services WHERE id = ? AND business_id = ?", (service_id, business_id))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        raise HTTPException(409, "No se puede eliminar: tiene turnos asociados. Desactivalo en su lugar.")
+    return {"deleted": service_id}
+
+
 class ProfessionalIn(BaseModel):
     name: str = Field(min_length=2, max_length=80)
     active: bool = True
@@ -350,6 +411,35 @@ def update_professional(
         (professional_id, business_id),
     ).fetchone()
     return _professional_row(row)
+
+
+@router.delete("/professionals/{professional_id}")
+def delete_professional(
+    professional_id: int,
+    business_id: int = Depends(require_business),
+    conn: sqlite3.Connection = Depends(get_conn),
+) -> dict:
+    if conn.execute(
+        "SELECT 1 FROM professionals WHERE id = ? AND business_id = ?", (professional_id, business_id)
+    ).fetchone() is None:
+        raise HTTPException(404, "El profesional no existe.")
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute(
+            "DELETE FROM working_hours WHERE professional_id = ? AND business_id = ?",
+            (professional_id, business_id),
+        )
+        conn.execute("DELETE FROM professionals WHERE id = ? AND business_id = ?", (professional_id, business_id))
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        raise HTTPException(
+            409, "No se puede eliminar: tiene turnos o lista de espera asociados. Desactivalo en su lugar."
+        )
+    except Exception:
+        conn.rollback()
+        raise
+    return {"deleted": professional_id}
 
 
 class HourRange(BaseModel):

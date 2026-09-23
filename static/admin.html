@@ -41,17 +41,27 @@
   label { font-size: .9rem; color: var(--muted); display: block; margin-bottom: 4px; }
   .error { color: var(--danger); margin: 0; min-height: 1.4em; }
 
-  /* Tira de dias */
-  .strip { display: flex; gap: 8px; overflow-x: auto; padding: 10px 2px 12px; scroll-snap-type: x proximity; }
-  .day { flex: 0 0 auto; scroll-snap-align: start; min-width: 62px; padding: 8px 6px; text-align: center; border-radius: 12px;
-         background: var(--card); border: 1.5px solid var(--line); color: var(--ink); }
-  .day .wd { font-size: .75rem; color: var(--muted); text-transform: uppercase; }
-  .day .num { font-size: 1.15rem; font-weight: 600; }
-  .day .count { font-size: .78rem; color: var(--muted); min-height: 1.1em; }
-  .day[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-  .day[aria-current="true"] .wd, .day[aria-current="true"] .count { color: var(--accent-ink); }
-  .day.busy .count { font-weight: 700; color: var(--accent); }
-  .day[aria-current="true"].busy .count { color: var(--accent-ink); }
+  /* Calendario mensual */
+  .cal-wrap { max-width: 320px; margin: 0 auto 12px; }
+  .cal-nav { display: flex; align-items: center; justify-content: space-between; margin: 0 0 6px; }
+  .cal-month-label { font-size: .92rem; font-weight: 700; text-transform: capitalize; }
+  .cal-nav-btn { background: var(--card); color: var(--accent); border: 1.5px solid var(--accent); border-radius: 8px;
+                 min-width: 28px; min-height: 28px; padding: 0; font-size: .9rem; line-height: 1; }
+  .cal-nav-btn:disabled { opacity: .35; cursor: not-allowed; }
+  .cal-head { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center;
+              font-size: .68rem; color: var(--muted); margin-bottom: 3px; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+  .cal-day { aspect-ratio: 1; min-height: 0; border-radius: 8px; border: 1px solid var(--line);
+             background: var(--card); color: var(--ink); padding: 1px; display: flex; flex-direction: column;
+             align-items: center; justify-content: center; gap: 0; font: inherit; }
+  .cal-day .n { font-size: .8rem; font-weight: 600; }
+  .cal-day .c { font-size: .6rem; color: var(--muted); min-height: 1em; }
+  .cal-day:hover { border-color: var(--accent); }
+  .cal-day.busy .c { font-weight: 700; color: var(--accent); }
+  .cal-day.today { box-shadow: 0 0 0 2px var(--accent) inset; }
+  .cal-day[aria-current="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .cal-day[aria-current="true"] .c { color: var(--accent-ink); }
+  .cal-empty { visibility: hidden; }
 
   /* Barra del dia */
   .bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin: 4px 0 10px; }
@@ -76,6 +86,9 @@
   .card.cancelled .who { text-decoration: line-through; }
   .danger { background: var(--danger); color: #fff; border: 0; border-radius: 10px; padding: 8px 14px; min-height: 44px; font-weight: 600; }
   @media (prefers-color-scheme: dark) { .danger { color: #1a1220; } }
+  .link.danger-link { color: var(--danger); }
+  .row-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  .confirm-inline { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 4px 0; }
   .empty { text-align: center; color: var(--muted); padding: 36px 12px; background: var(--card); border: 1px dashed var(--line); border-radius: 14px; }
   .toast { position: fixed; left: 50%; bottom: 20px; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 10px 16px; border-radius: 999px; font-size: .95rem; max-width: 90vw; }
   /* Lista de espera */
@@ -102,8 +115,13 @@
   .config-section { margin-bottom: 30px; }
   .config-section h2 { font-size: 1.1rem; margin: 0 0 4px; }
   .config-section > p { color: var(--muted); margin: 0 0 12px; font-size: .92rem; }
-  .config-form { display: flex; flex-direction: column; gap: 10px; max-width: 480px; }
+  .config-form { display: flex; flex-direction: column; gap: 10px; max-width: 640px; }
   .config-form label { margin-top: 4px; }
+  .config-form input:not([type=color]) { width: 100%; }
+  .examples-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 8px; }
+  .example-row { display: flex; gap: 8px; align-items: center; }
+  .example-row input { flex: 1; }
+  .example-remove { flex: 0 0 auto; min-width: 44px; min-height: 44px; padding: 0; font-size: 1.1rem; line-height: 1; }
   table.catalog { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
   table.catalog th, table.catalog td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); font-size: .95rem; }
   table.catalog input[type=text], table.catalog input[type=number] { min-height: 40px; padding: 8px; width: 100%; }
@@ -140,6 +158,7 @@
     <button class="primary" type="submit">Ingresar</button>
   </form>
   <p style="margin-top:14px"><a href="/registro">¿Todavía no tenés cuenta? Registrá tu negocio</a></p>
+  <p style="margin-top:6px"><a href="/">← Volver al inicio</a></p>
 </section>
 
 <div class="wrap" id="app" hidden>
@@ -154,7 +173,15 @@
   </div>
 
   <section id="agendaView">
-    <nav class="strip" id="strip" aria-label="Próximos días"></nav>
+    <div class="cal-wrap">
+      <div class="cal-nav">
+        <button class="cal-nav-btn" id="calPrev" type="button" aria-label="Mes anterior">‹</button>
+        <span class="cal-month-label" id="calMonthLabel"></span>
+        <button class="cal-nav-btn" id="calNext" type="button" aria-label="Mes siguiente">›</button>
+      </div>
+      <div class="cal-head" id="calHead"></div>
+      <div class="cal-grid" id="calGrid" aria-label="Calendario del mes"></div>
+    </div>
 
     <div class="bar">
       <h2 id="dayTitle"></h2>
@@ -197,6 +224,12 @@
         <div><label for="cfgWelcome">Mensaje de bienvenida</label><input id="cfgWelcome" type="text" maxlength="300" required></div>
         <div><label for="cfgLogo">URL del logo (opcional)</label><input id="cfgLogo" type="url" maxlength="500" placeholder="https://..."></div>
         <div><label for="cfgColor">Color principal</label><input id="cfgColor" type="color" style="max-width:80px"></div>
+        <div>
+          <label id="examplesLabel">Ejemplos que ve el cliente para empezar (opcional)</label>
+          <p class="hint">Frases sugeridas en el chat de reserva.</p>
+          <div id="examplesList" class="examples-list" role="group" aria-labelledby="examplesLabel"></div>
+          <button class="ghost" id="addExample" type="button">+ Agregar ejemplo</button>
+        </div>
         <div><button class="primary" type="submit">Guardar</button></div>
       </form>
     </div>
@@ -290,19 +323,53 @@
     renderWaitlist();
   }
 
+  const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+                 "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+
+  function renderMonthCalendar() {
+    const [y, m] = data.month.split("-").map(Number); // m es 1-indexado
+    $("calMonthLabel").textContent = `${MESES[m - 1]} ${y}`;
+    const byDay = Object.fromEntries(data.month_days.map((d) => [d.day, d.count]));
+
+    const head = $("calHead");
+    if (!head.childElementCount) ["L", "M", "M", "J", "V", "S", "D"].forEach((l) => head.appendChild(el("span", "", l)));
+
+    const grid = $("calGrid"); grid.replaceChildren();
+    const firstWeekday = (new Date(y, m - 1, 1).getDay() + 6) % 7; // semana arranca lunes
+    const daysInMonth = new Date(y, m, 0).getDate();
+    for (let i = 0; i < firstWeekday; i++) grid.appendChild(el("span", "cal-empty"));
+    for (let d = 1; d <= daysInMonth; d++) {
+      const iso = `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+      const count = byDay[iso] || 0;
+      const btn = el("button", "cal-day" + (count ? " busy" : "") + (iso === today ? " today" : ""));
+      btn.type = "button";
+      btn.append(el("span", "n", String(d)), el("span", "c", count ? String(count) : ""));
+      if (iso === day) btn.setAttribute("aria-current", "true");
+      btn.setAttribute("aria-label", `${d} de ${MESES[m - 1]}: ${count} ${count === 1 ? "turno" : "turnos"}`);
+      btn.addEventListener("click", () => load(iso));
+      grid.appendChild(btn);
+    }
+  }
+
+  async function shiftMonth(delta) {
+    const [y, m] = data.month.split("-").map(Number);
+    let ny = y, nm = m + delta;
+    if (nm < 1) { nm = 12; ny -= 1; } else if (nm > 12) { nm = 1; ny += 1; }
+    const monthStr = `${ny}-${String(nm).padStart(2, "0")}`;
+    $("calPrev").disabled = $("calNext").disabled = true;
+    try {
+      const res = await api(`/api/admin/agenda?day=${day}&month=${monthStr}`);
+      data.month = res.month; data.month_days = res.month_days;
+      renderMonthCalendar();
+    } catch (err) {
+      if (err.status === 401) { showLogin("La sesión venció. Iniciá sesión de nuevo."); return; }
+      toast(err.message);
+    }
+    $("calPrev").disabled = $("calNext").disabled = false;
+  }
+
   function render() {
-    // Tira de proximos dias (si el dia elegido esta fuera de la tira, simplemente no se marca ninguno)
-    const strip = $("strip"); strip.replaceChildren();
-    data.upcoming.forEach((u) => {
-      const b = el("button", "day" + (u.count ? " busy" : ""));
-      b.type = "button";
-      b.setAttribute("aria-label", `${fmt(u.day, { weekday: "long", day: "numeric", month: "long" })}: ${u.count} ${u.count === 1 ? "turno" : "turnos"}`);
-      if (u.day === day) b.setAttribute("aria-current", "true");
-      b.append(el("div", "wd", fmt(u.day, { weekday: "short" }).replace(".", "")), el("div", "num", fmt(u.day, { day: "numeric" })),
-               el("div", "count", u.count ? `${u.count} ${u.count === 1 ? "turno" : "turnos"}` : "libre"));
-      b.addEventListener("click", () => load(u.day));
-      strip.appendChild(b);
-    });
+    renderMonthCalendar();
 
     const long = fmt(day, { weekday: "long", day: "numeric", month: "long" });
     $("dayTitle").textContent = day === today ? `Hoy · ${long}` : long.charAt(0).toUpperCase() + long.slice(1);
@@ -489,21 +556,53 @@
     }
   }
 
+  const MAX_EXAMPLES = 3;
+  let exampleValues = [];
+
+  function renderExamples() {
+    const list = $("examplesList"); list.replaceChildren();
+    exampleValues.forEach((val, i) => {
+      const row = el("div", "example-row");
+      const input = el("input"); input.type = "text"; input.maxLength = 120;
+      input.value = val; input.placeholder = "Ej: Quiero un turno para el jueves a la tarde";
+      input.setAttribute("aria-label", `Ejemplo ${i + 1}`);
+      input.addEventListener("input", () => { exampleValues[i] = input.value; });
+      const remove = el("button", "ghost example-remove", "×"); remove.type = "button";
+      remove.setAttribute("aria-label", "Quitar este ejemplo");
+      remove.addEventListener("click", () => { exampleValues.splice(i, 1); renderExamples(); });
+      row.append(input, remove);
+      list.appendChild(row);
+    });
+    $("addExample").hidden = exampleValues.length >= MAX_EXAMPLES;
+  }
+
+  $("addExample").addEventListener("click", () => {
+    if (exampleValues.length >= MAX_EXAMPLES) return;
+    exampleValues.push("");
+    renderExamples();
+    const inputs = $("examplesList").querySelectorAll("input");
+    inputs[inputs.length - 1].focus();
+  });
+
   function fillSettingsForm(b) {
     $("cfgName").value = b.name;
     $("cfgWelcome").value = b.welcome_message;
     $("cfgLogo").value = b.logo_url || "";
     $("cfgColor").value = b.color_primary || "#7a3e65";
+    exampleValues = (b.example_prompts || []).slice(0, MAX_EXAMPLES);
+    renderExamples();
   }
 
   $("settingsForm").addEventListener("submit", async (e) => {
     e.preventDefault();
+    const examplePrompts = exampleValues.map((v) => v.trim()).filter(Boolean);
     try {
       await api("/api/admin/business", "PUT", {
         name: $("cfgName").value,
         welcome_message: $("cfgWelcome").value,
         logo_url: $("cfgLogo").value || null,
         color_primary: $("cfgColor").value || null,
+        example_prompts: examplePrompts,
       });
       toast("Datos del negocio guardados.");
       refreshBusinessName();
@@ -546,6 +645,25 @@
     });
   }
 
+  // Reemplaza toda la fila por una confirmacion antes de un borrado, para evitar clicks accidentales.
+  function confirmRowDelete(tr, colspan, question, action) {
+    const originalCells = [...tr.children];
+    const td = el("td"); td.colSpan = colspan;
+    const box = el("div", "confirm-inline");
+    box.appendChild(el("span", "meta", question));
+    const yes = el("button", "danger", "Sí, eliminar"); yes.type = "button";
+    const no = el("button", "ghost", "No, cancelar"); no.type = "button";
+    no.addEventListener("click", () => tr.replaceChildren(...originalCells));
+    yes.addEventListener("click", async () => {
+      yes.disabled = no.disabled = true; yes.textContent = "Eliminando…";
+      try { await action(); }
+      catch (err) { toast(err.message); tr.replaceChildren(...originalCells); }
+    });
+    box.append(yes, no);
+    td.appendChild(box);
+    tr.replaceChildren(td);
+  }
+
   function renderServices(services) {
     const tbody = $("servicesTable").querySelector("tbody");
     tbody.replaceChildren();
@@ -557,7 +675,8 @@
       tdDur.appendChild(dur);
       const tdActive = el("td"); const active = el("input"); active.type = "checkbox"; active.checked = svc.active;
       tdActive.appendChild(active);
-      const tdSave = el("td"); const save = el("button", "ghost", "Guardar"); save.type = "button";
+      const tdActions = el("td", "row-actions");
+      const save = el("button", "ghost", "Guardar"); save.type = "button";
       save.addEventListener("click", async () => {
         save.disabled = true;
         try {
@@ -566,8 +685,16 @@
         } catch (err) { toast(err.message); }
         save.disabled = false;
       });
-      tdSave.appendChild(save);
-      tr.append(tdName, tdDur, tdActive, tdSave);
+      const del = el("button", "link danger-link", "Eliminar"); del.type = "button";
+      del.addEventListener("click", () => {
+        confirmRowDelete(tr, 4, `¿Eliminar "${svc.name}"? No se puede deshacer.`, async () => {
+          await api(`/api/admin/services/${svc.id}`, "DELETE");
+          renderServices((await api("/api/admin/services")).services);
+          toast("Servicio eliminado.");
+        });
+      });
+      tdActions.append(save, del);
+      tr.append(tdName, tdDur, tdActive, tdActions);
       tbody.appendChild(tr);
     });
   }
@@ -591,7 +718,8 @@
       tdName.appendChild(name);
       const tdActive = el("td"); const active = el("input"); active.type = "checkbox"; active.checked = pro.active;
       tdActive.appendChild(active);
-      const tdSave = el("td"); const save = el("button", "ghost", "Guardar"); save.type = "button";
+      const tdActions = el("td", "row-actions");
+      const save = el("button", "ghost", "Guardar"); save.type = "button";
       save.addEventListener("click", async () => {
         save.disabled = true;
         try {
@@ -602,8 +730,18 @@
         } catch (err) { toast(err.message); }
         save.disabled = false;
       });
-      tdSave.appendChild(save);
-      tr.append(tdName, tdActive, tdSave);
+      const del = el("button", "link danger-link", "Eliminar"); del.type = "button";
+      del.addEventListener("click", () => {
+        confirmRowDelete(tr, 3, `¿Eliminar a "${pro.name}"? No se puede deshacer.`, async () => {
+          await api(`/api/admin/professionals/${pro.id}`, "DELETE");
+          renderProfessionals((await api("/api/admin/professionals")).professionals);
+          hoursData = await api("/api/admin/working-hours");
+          renderHoursPicker();
+          toast("Profesional eliminado.");
+        });
+      });
+      tdActions.append(save, del);
+      tr.append(tdName, tdActive, tdActions);
       tbody.appendChild(tr);
     });
   }
@@ -699,6 +837,8 @@
     try { await api("/api/logout", "POST"); } catch (_) {}
     showLogin();
   });
+  $("calPrev").addEventListener("click", () => shiftMonth(-1));
+  $("calNext").addEventListener("click", () => shiftMonth(1));
   $("prev").addEventListener("click", () => shift(-1));
   $("next").addEventListener("click", () => shift(1));
   $("today").addEventListener("click", () => load(today));

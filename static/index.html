@@ -50,9 +50,15 @@
   .chips[hidden] { display: none; }
   .chip { border-radius: 999px; padding: 8px 14px; min-height: 40px; font-size: .95rem; }
   .calendar { margin-top: 10px; }
+  .cal-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+  .cal-month-label { font-weight: 600; text-transform: capitalize; }
+  .cal-nav-btn { background: var(--card); color: var(--accent); border: 1.5px solid var(--accent); border-radius: 10px;
+                 min-width: 40px; min-height: 40px; font-size: 1.1rem; line-height: 1; }
+  .cal-nav-btn:disabled { opacity: .35; cursor: not-allowed; border-color: var(--line); color: var(--muted); }
   .cal-head { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center;
               font-size: .8rem; color: var(--muted); margin-bottom: 4px; }
-  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+  .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; transition: opacity .15s; }
+  .cal-grid.loading { opacity: .5; pointer-events: none; }
   .cal-day { aspect-ratio: 1; min-height: 40px; border-radius: 10px; border: 1.5px solid var(--line);
              background: var(--card); color: var(--ink); padding: 0; }
   .cal-day:not(:disabled):hover { border-color: var(--accent); }
@@ -88,7 +94,7 @@
   <div id="chips" class="chips" aria-label="Ejemplos para empezar"></div>
 
   <form id="composer" autocomplete="off">
-    <input id="text" type="text" maxlength="500" placeholder="Ej: quiero un corte el viernes a la tarde"
+    <input id="text" type="text" maxlength="500" placeholder="Escribí qué necesitás y para cuándo"
            aria-label="Tu mensaje" required>
     <button class="primary" id="send" type="submit">Enviar</button>
   </form>
@@ -107,6 +113,9 @@
   const API_BASE = `/api/b/${SLUG}`;
 
   const WEEKDAYS_ES = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+  const MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
+                     "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+  const MAX_MONTHS_AHEAD = 3;
   function dayLabel(iso) {
     const d = new Date(`${iso}T00:00:00`);
     const dd = String(d.getDate()).padStart(2, "0");
@@ -169,39 +178,87 @@
 
   function renderCalendar(bubble, data) {
     const wrap = el("div", "calendar");
-    const avail = new Set(data.calendar_days);
     const today = new Date(); today.setHours(0, 0, 0, 0);
+    const initial = data.selected_day ? new Date(`${data.selected_day}T00:00:00`) : today;
+    const state = {
+      year: initial.getFullYear(), month: initial.getMonth(), // month: 0-indexado
+      selected: data.selected_day || null, ctx: data.context, avail: new Set(), cache: {},
+    };
 
-    let spanDays = 14;
-    const lastIso = data.selected_day || data.calendar_days[data.calendar_days.length - 1];
-    if (lastIso) {
-      const diff = Math.round((new Date(`${lastIso}T00:00:00`) - today) / 86400000);
-      spanDays = Math.max(spanDays, diff + 1);
-    }
+    const nav = el("div", "cal-nav");
+    const prevBtn = el("button", "cal-nav-btn", "‹"); prevBtn.type = "button"; prevBtn.setAttribute("aria-label", "Mes anterior");
+    const monthLabel = el("span", "cal-month-label");
+    const nextBtn = el("button", "cal-nav-btn", "›"); nextBtn.type = "button"; nextBtn.setAttribute("aria-label", "Mes siguiente");
+    nav.append(prevBtn, monthLabel, nextBtn);
 
     const head = el("div", "cal-head");
     ["L", "M", "M", "J", "V", "S", "D"].forEach((l) => head.appendChild(el("span", "", l)));
-    wrap.appendChild(head);
 
     const grid = el("div", "cal-grid");
-    const leading = (today.getDay() + 6) % 7; // semana arranca lunes
-    for (let i = 0; i < leading; i++) grid.appendChild(el("span", "cal-empty"));
-    for (let i = 0; i < spanDays; i++) {
-      const d = new Date(today); d.setDate(today.getDate() + i);
-      const iso = d.toISOString().slice(0, 10);
-      const btn = el("button", "cal-day", String(d.getDate()));
-      btn.type = "button";
-      btn.dataset.iso = iso;
-      if (!avail.has(iso)) btn.disabled = true;
-      if (iso === data.selected_day) btn.classList.add("selected");
-      btn.addEventListener("click", () => selectDay(iso, wrap, timesBox, data.context));
-      grid.appendChild(btn);
-    }
-    wrap.appendChild(grid);
-
     const timesBox = el("div", "cal-times");
-    wrap.appendChild(timesBox);
+    wrap.append(nav, head, grid, timesBox);
     bubble.appendChild(wrap);
+
+    async function loadMonth(year, month) {
+      const key = `${year}-${String(month + 1).padStart(2, "0")}`;
+      if (state.cache[key]) { state.avail = state.cache[key]; return; }
+      const params = new URLSearchParams({ service_id: state.ctx.service_id, month: key });
+      if (state.ctx.professional_id) params.set("professional_id", state.ctx.professional_id);
+      try {
+        const res = await api(`${API_BASE}/availability?${params.toString()}`);
+        state.avail = state.cache[key] = new Set(res.days);
+      } catch (_) {
+        state.avail = new Set();
+      }
+    }
+
+    function drawGrid() {
+      monthLabel.textContent = `${MESES_ES[state.month]} ${state.year}`;
+      grid.replaceChildren();
+      const firstWeekday = (new Date(state.year, state.month, 1).getDay() + 6) % 7; // semana arranca lunes
+      const daysInMonth = new Date(state.year, state.month + 1, 0).getDate();
+      for (let i = 0; i < firstWeekday; i++) grid.appendChild(el("span", "cal-empty"));
+      for (let d = 1; d <= daysInMonth; d++) {
+        const dt = new Date(state.year, state.month, d);
+        const iso = `${state.year}-${String(state.month + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+        const btn = el("button", "cal-day", String(d));
+        btn.type = "button";
+        btn.dataset.iso = iso;
+        if (dt < today || !state.avail.has(iso)) btn.disabled = true;
+        if (iso === state.selected) btn.classList.add("selected");
+        btn.addEventListener("click", () => {
+          state.selected = iso;
+          grid.querySelectorAll(".cal-day").forEach((b) => b.classList.toggle("selected", b.dataset.iso === iso));
+          selectDay(iso, timesBox, state.ctx);
+        });
+        grid.appendChild(btn);
+      }
+      const monthsAhead = (state.year - today.getFullYear()) * 12 + (state.month - today.getMonth());
+      prevBtn.disabled = monthsAhead <= 0;
+      nextBtn.disabled = monthsAhead >= MAX_MONTHS_AHEAD;
+    }
+
+    async function goTo(year, month) {
+      prevBtn.disabled = nextBtn.disabled = true;
+      grid.classList.add("loading");
+      await loadMonth(year, month);
+      state.year = year; state.month = month;
+      grid.classList.remove("loading");
+      drawGrid();
+    }
+
+    prevBtn.addEventListener("click", () => {
+      let m = state.month - 1, y = state.year;
+      if (m < 0) { m = 11; y -= 1; }
+      goTo(y, m);
+    });
+    nextBtn.addEventListener("click", () => {
+      let m = state.month + 1, y = state.year;
+      if (m > 11) { m = 0; y += 1; }
+      goTo(y, m);
+    });
+
+    loadMonth(state.year, state.month).then(drawGrid);
 
     if (data.selected_day) {
       renderTimes(timesBox, data.options, data.selected_time, data.selected_day);
@@ -212,8 +269,7 @@
     }
   }
 
-  async function selectDay(iso, wrap, timesBox, ctx) {
-    wrap.querySelectorAll(".cal-day").forEach((b) => b.classList.toggle("selected", b.dataset.iso === iso));
+  async function selectDay(iso, timesBox, ctx) {
     timesBox.innerHTML = "";
     timesBox.appendChild(el("div", "status", "Buscando horarios…"));
     try {
@@ -335,13 +391,6 @@
 
   form.addEventListener("submit", (e) => { e.preventDefault(); send(input.value); });
 
-  ["Quiero un corte mañana a la tarde", "Necesito una tintura el viernes", "Un peinado el sábado a las 10"].forEach((t) => {
-    const c = el("button", "chip", t);
-    c.type = "button";
-    c.addEventListener("click", () => send(t));
-    chips.appendChild(c);
-  });
-
   api(`${API_BASE}/business`).then((b) => {
     document.getElementById("business").textContent = b.name;
     document.title = `Reservá tu turno · ${b.name}`;
@@ -350,6 +399,13 @@
       const logo = document.getElementById("logo");
       logo.src = b.logo_url; logo.alt = b.name; logo.hidden = false;
     }
+    (b.example_prompts || []).forEach((t) => {
+      const c = el("button", "chip", t);
+      c.type = "button";
+      c.addEventListener("click", () => send(t));
+      chips.appendChild(c);
+    });
+    if (b.example_prompts && b.example_prompts.length) input.placeholder = `Ej: ${b.example_prompts[0]}`;
     say(b.welcome_message);
   }).catch((err) => {
     say(err.status === 404 ? "Este negocio no existe o cambió de dirección." : "No pude conectarme con el servidor. Recargá la página en unos segundos.", "error");

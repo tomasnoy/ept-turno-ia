@@ -189,6 +189,7 @@ MIGRATIONS = {
     "working_hours": {"business_id": "INTEGER NOT NULL DEFAULT 1"},
     "customers": {"business_id": "INTEGER NOT NULL DEFAULT 1"},
     "appointments": {"business_id": "INTEGER NOT NULL DEFAULT 1"},
+    "businesses": {"example_prompts": "TEXT"},
 }
 
 

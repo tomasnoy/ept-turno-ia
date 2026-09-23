@@ -109,6 +109,7 @@ class WaitlistIn(BaseModel):
 
 
 MAX_WAITLIST_DAYS_AHEAD = 60
+MAX_CALENDAR_MONTHS_AHEAD = 3
 
 
 @app.get("/health")
@@ -215,6 +216,40 @@ def slots(
             for o in options
         ],
     }
+
+
+@app.get("/api/b/{slug}/availability")
+def availability(
+    service_id: int,
+    month: str,
+    request: Request,
+    professional_id: int | None = None,
+    business=Depends(get_business_by_slug),
+    conn=Depends(get_conn),
+    now: datetime = Depends(get_now),
+) -> dict:
+    ip = request.client.host if request.client else "desconocido"
+    auth.check_request_limit(f"availability:{business['id']}:{ip}", limit=60, window_seconds=60)
+    catalog = flow.load_catalog(conn, business["id"])
+    if service_id not in dict(catalog.services):
+        raise HTTPException(400, "Servicio inexistente")
+    if professional_id is not None and professional_id not in dict(catalog.professionals):
+        raise HTTPException(400, "Profesional inexistente")
+    try:
+        year, mo = (int(p) for p in month.split("-"))
+        first = date(year, mo, 1)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Mes inválido. Usá el formato YYYY-MM.")
+    months_ahead = (year - now.year) * 12 + (mo - now.month)
+    if not (0 <= months_ahead <= MAX_CALENDAR_MONTHS_AHEAD):
+        raise HTTPException(400, "Ese mes está fuera del rango disponible para reservar.")
+    last = date(year + mo // 12, mo % 12 + 1, 1) - timedelta(days=1)
+    start = max(first, now.date())
+    days_available: list[date] = []
+    if start <= last:
+        span = (last - start).days + 1
+        days_available = flow.available_days(conn, catalog, service_id, professional_id, start, now, days=span)
+    return {"month": f"{year:04d}-{mo:02d}", "days": [d.isoformat() for d in days_available]}
 
 
 @app.post("/api/b/{slug}/book")
