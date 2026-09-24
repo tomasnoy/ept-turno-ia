@@ -28,8 +28,8 @@
   header p { margin: 4px 0 0; color: var(--muted); font-size: .95rem; }
   #log { flex: 1; display: flex; flex-direction: column; gap: 10px; padding: 12px 0; }
   .msg { max-width: 88%; padding: 10px 14px; border-radius: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
-  .bot { background: var(--bot); align-self: flex-start; border-bottom-left-radius: 4px; }
-  .user { background: var(--user); color: var(--accent-ink); align-self: flex-end; border-bottom-right-radius: 4px; }
+  .bot { background: var(--bot); color: var(--bot-ink, var(--ink)); align-self: flex-start; border-bottom-left-radius: 4px; }
+  .user { background: var(--user); color: var(--user-ink, var(--accent-ink)); align-self: flex-end; border-bottom-right-radius: 4px; }
   .status { color: var(--muted); font-style: italic; }
   .error { color: var(--danger); }
   .success { border: 2px solid var(--ok); background: var(--card); }
@@ -190,6 +190,11 @@
       year: initial.getFullYear(), month: initial.getMonth(), // month: 0-indexado
       selected: data.selected_day || null, ctx: data.context, avail: new Set(), cache: {},
     };
+    // /chat ya trae calendar_days: pintamos con eso al toque y confirmamos con /availability en segundo plano.
+    const initialKey = `${state.year}-${String(state.month + 1).padStart(2, "0")}`;
+    if (data.calendar_days.length) {
+      state.avail = new Set(data.calendar_days.filter((d) => d.slice(0, 7) === initialKey));
+    }
 
     const nav = el("div", "cal-nav");
     const prevBtn = el("button", "cal-nav-btn", "‹"); prevBtn.type = "button"; prevBtn.setAttribute("aria-label", "Mes anterior");
@@ -265,7 +270,11 @@
     });
 
     prevBtn.disabled = nextBtn.disabled = true;
-    loadMonth(state.year, state.month).then(drawGrid);
+    if (state.avail.size) drawGrid(); // pintado optimista con lo que ya trajo /chat
+    loadMonth(state.year, state.month).then(() => {
+      // si el usuario ya cambio de mes, no pisamos lo que esta viendo
+      if (`${state.year}-${String(state.month + 1).padStart(2, "0")}` === initialKey) drawGrid();
+    });
 
     if (data.selected_day) {
       renderTimes(timesBox, data.options, data.selected_time, data.selected_day);
@@ -407,10 +416,51 @@
     });
   }
 
+  // Deriva los fondos de los mensajes (y el contraste del texto) del color de marca del negocio,
+  // asi bot/usuario quedan en tonos equivalentes al acento en vez de fijos.
+  function hexToRgb(hex) {
+    const h = hex.replace("#", "");
+    const full = h.length === 3 ? h.split("").map((c) => c + c).join("") : h;
+    const n = parseInt(full, 16);
+    return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+  }
+  function rgbToHex([r, g, b]) {
+    return "#" + [r, g, b].map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
+  }
+  function relativeLuminance([r, g, b]) {
+    const [rs, gs, bs] = [r, g, b].map((v) => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    });
+    return 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+  }
+  const contrastColor = (hex) => (relativeLuminance(hexToRgb(hex)) > 0.5 ? "#000000" : "#ffffff");
+  const mixHex = (hexA, hexB, ratioA) => {
+    const a = hexToRgb(hexA), b = hexToRgb(hexB);
+    return rgbToHex(a.map((v, i) => v * ratioA + b[i] * (1 - ratioA)));
+  };
+
+  function applyBrandColor(hex) {
+    const prefersDark = matchMedia("(prefers-color-scheme: dark)").matches;
+    const root = document.documentElement.style;
+    root.setProperty("--accent", hex);
+    root.setProperty("--accent-ink", contrastColor(hex));
+    root.setProperty("--user", hex);
+    root.setProperty("--user-ink", contrastColor(hex));
+    // fondo del bot: mismo tono que el acento, aclarado (o oscurecido en modo oscuro) para que
+    // siga siendo un fondo sutil y no un bloque de color solido.
+    const bot = mixHex(hex, prefersDark ? "#000000" : "#ffffff", prefersDark ? 0.18 : 0.15);
+    root.setProperty("--bot", bot);
+    root.setProperty("--bot-ink", contrastColor(bot));
+  }
+
   api(`${API_BASE}/business`).then((b) => {
     document.getElementById("business").textContent = b.name;
     document.title = `Reservá tu turno · ${b.name}`;
-    if (b.color_primary) document.documentElement.style.setProperty("--accent", b.color_primary);
+    if (b.color_primary) {
+      applyBrandColor(b.color_primary);
+      matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyBrandColor(b.color_primary));
+    }
     if (b.logo_url) {
       const logo = document.getElementById("logo");
       logo.src = b.logo_url; logo.alt = b.name; logo.hidden = false;

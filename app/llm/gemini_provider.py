@@ -24,7 +24,7 @@ class GeminiProvider(LLMProvider):
                     "contents": [{"role": "user", "parts": [{"text": user}]}],
                     "generationConfig": {"temperature": 0, "responseMimeType": "application/json"},
                 },
-                timeout=60,
+                timeout=10,
             )
             resp.raise_for_status()
         except httpx.HTTPError as exc:
