@@ -1,5 +1,7 @@
 # Gestor de turnos con IA
 
+[![AI-DECLARATION: copilot](https://img.shields.io/badge/䷼%20AI--DECLARATION-copilot-fee2e2?labelColor=fee2e2)](https://ai-declaration.md)
+
 SaaS multi-negocio de gestión de turnos para negocios chicos que trabajan con reserva
 (peluquerías, consultorios de belleza, pilates, etc.). Cada negocio se registra con su propia
 cuenta, personaliza su página (nombre, logo, color) y gestiona su agenda desde su panel. Sus
