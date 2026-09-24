@@ -15,3 +15,4 @@ data/*.db
 
 # Informe del curso: material de trabajo local, no forma parte del repositorio publico
 docs/
+capturas/
