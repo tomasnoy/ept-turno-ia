@@ -12,7 +12,8 @@ from app.llm.factory import get_provider
 
 conn = db.connect(":memory:")
 db.init_db(conn)
-seed.seed_demo(conn)
+business = seed.seed_demo(conn)
+business_id = business["id"] if business else 1
 
 mensaje = " ".join(sys.argv[1:]) or "Hola, quiero un corte con Laura el viernes a la tarde"
-print(interpret(mensaje, load_catalog(conn), date.today(), get_provider()))
+print(interpret(mensaje, load_catalog(conn, business_id), date.today(), get_provider()))
