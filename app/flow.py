@@ -5,6 +5,7 @@ usuario confirma. Las respuestas al usuario se arman con plantillas, sin IA: son
 predecibles.
 """
 
+import calendar
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -75,6 +76,19 @@ def day_label(day: date) -> str:
     return f"{WEEKDAYS[day.weekday()]} {day:%d/%m}".replace("miercoles", "miércoles").replace(
         "sabado", "sábado"
     )
+
+
+def parse_month(month: str) -> tuple[int, int]:
+    """Parsea un mes "YYYY-MM". Levanta ValueError si el formato no es valido."""
+    year_str, month_str = month.split("-")
+    return int(year_str), int(month_str)
+
+
+def month_bounds(year: int, month: int) -> tuple[date, date]:
+    """Primer y ultimo dia de un mes. Levanta ValueError si year/month no son validos."""
+    first = date(year, month, 1)
+    last = date(year, month, calendar.monthrange(year, month)[1])
+    return first, last
 
 
 def sanitize_context(ctx: Context, catalog: Catalog, today: date) -> Context:

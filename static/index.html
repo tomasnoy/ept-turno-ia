@@ -116,6 +116,12 @@
   const MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio",
                      "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
   const MAX_MONTHS_AHEAD = 3;
+  // Se muestran si el negocio no cargo ejemplos propios, o si /business no respondio.
+  const FALLBACK_PROMPTS = [
+    "Quiero reservar un turno para mañana",
+    "¿Qué turnos hay para el viernes?",
+    "Necesito un turno para el sábado a la mañana",
+  ];
   function dayLabel(iso) {
     const d = new Date(`${iso}T00:00:00`);
     const dd = String(d.getDate()).padStart(2, "0");
@@ -258,6 +264,7 @@
       goTo(y, m);
     });
 
+    prevBtn.disabled = nextBtn.disabled = true;
     loadMonth(state.year, state.month).then(drawGrid);
 
     if (data.selected_day) {
@@ -391,6 +398,15 @@
 
   form.addEventListener("submit", (e) => { e.preventDefault(); send(input.value); });
 
+  function renderChips(prompts) {
+    prompts.forEach((t) => {
+      const c = el("button", "chip", t);
+      c.type = "button";
+      c.addEventListener("click", () => send(t));
+      chips.appendChild(c);
+    });
+  }
+
   api(`${API_BASE}/business`).then((b) => {
     document.getElementById("business").textContent = b.name;
     document.title = `Reservá tu turno · ${b.name}`;
@@ -399,15 +415,14 @@
       const logo = document.getElementById("logo");
       logo.src = b.logo_url; logo.alt = b.name; logo.hidden = false;
     }
-    (b.example_prompts || []).forEach((t) => {
-      const c = el("button", "chip", t);
-      c.type = "button";
-      c.addEventListener("click", () => send(t));
-      chips.appendChild(c);
-    });
-    if (b.example_prompts && b.example_prompts.length) input.placeholder = `Ej: ${b.example_prompts[0]}`;
+    const prompts = b.example_prompts && b.example_prompts.length ? b.example_prompts : FALLBACK_PROMPTS;
+    renderChips(prompts);
+    input.placeholder = `Ej: ${prompts[0]}`;
     say(b.welcome_message);
   }).catch((err) => {
+    // Sin datos del negocio no hay ejemplos propios, pero igual dejamos algo para empezar
+    // si el problema fue de red y no porque el negocio no existe.
+    if (err.status !== 404) renderChips(FALLBACK_PROMPTS);
     say(err.status === 404 ? "Este negocio no existe o cambió de dirección." : "No pude conectarme con el servidor. Recargá la página en unos segundos.", "error");
   });
 </script>

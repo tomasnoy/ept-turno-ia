@@ -421,6 +421,14 @@
     return li;
   }
 
+  // Deshabilita los botones, corre la accion y muestra el error en un toast si falla.
+  // Usado tanto por confirmStep (tarjetas de la agenda) como por confirmRowDelete (filas de tabla).
+  async function runConfirmAction(yes, no, busyText, action) {
+    yes.disabled = no.disabled = true; yes.textContent = busyText;
+    try { await action(); return true; }
+    catch (err) { toast(err.message); return false; }
+  }
+
   // Paso de confirmacion en el lugar: evita acciones por error sin abrir ventanas emergentes.
   function confirmStep(box, question, yesText, yesClass, action) {
     const before = [...box.childNodes];
@@ -430,8 +438,7 @@
     const no = el("button", "ghost", "No, volver"); no.type = "button";
     no.addEventListener("click", () => { delete box.dataset.confirming; box.replaceChildren(...before); });
     yes.addEventListener("click", async () => {
-      yes.disabled = no.disabled = true; yes.textContent = "Un momento…";
-      try { await action(); } catch (err) { toast(err.message); }
+      await runConfirmAction(yes, no, "Un momento…", action);
       delete box.dataset.confirming;
       load(day);
     });
@@ -655,9 +662,8 @@
     const no = el("button", "ghost", "No, cancelar"); no.type = "button";
     no.addEventListener("click", () => tr.replaceChildren(...originalCells));
     yes.addEventListener("click", async () => {
-      yes.disabled = no.disabled = true; yes.textContent = "Eliminando…";
-      try { await action(); }
-      catch (err) { toast(err.message); tr.replaceChildren(...originalCells); }
+      const ok = await runConfirmAction(yes, no, "Eliminando…", action);
+      if (!ok) tr.replaceChildren(...originalCells);
     });
     box.append(yes, no);
     td.appendChild(box);

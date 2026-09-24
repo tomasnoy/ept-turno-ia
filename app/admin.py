@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
-from app import scheduling, tenancy, waitlist
+from app import flow, scheduling, tenancy, waitlist
 from app.auth import require_business
 from app.deps import get_conn, get_now
 
@@ -60,31 +60,27 @@ def agenda(
         for i in range(UPCOMING_DAYS)
     ]
 
-    if month:
-        try:
-            month_year, month_num = (int(p) for p in month.split("-"))
-            first = date(month_year, month_num, 1)
-        except (ValueError, TypeError):
-            raise HTTPException(400, "Mes inválido. Usá el formato YYYY-MM.")
-    else:
-        month_year, month_num, first = day.year, day.month, date(day.year, day.month, 1)
-    last = date(month_year + month_num // 12, month_num % 12 + 1, 1) - timedelta(days=1)
+    try:
+        month_year, month_num = flow.parse_month(month) if month else (day.year, day.month)
+        first, last = flow.month_bounds(month_year, month_num)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Mes inválido. Usá el formato YYYY-MM.")
+    days_in_month = (last - first).days + 1
     month_rows = conn.execute(
         """SELECT substr(start, 1, 10) AS day, COUNT(*) AS n FROM appointments
-           WHERE business_id = ? AND status IN ('confirmed', 'pending') AND start >= ? AND start < ?
+           WHERE business_id = ? AND status IN ('confirmed', 'pending') AND start >= ? AND start <= ?
            GROUP BY day""",
         (
             business_id,
             datetime(first.year, first.month, first.day).isoformat(),
-            (datetime(last.year, last.month, last.day) + timedelta(days=1)).isoformat(),
+            datetime(last.year, last.month, last.day, 23, 59, 59, 999999).isoformat(),
         ),
     ).fetchall()
     month_by_day = {r["day"]: r["n"] for r in month_rows}
     month_days = []
-    cursor = first
-    while cursor <= last:
-        month_days.append({"day": cursor.isoformat(), "count": month_by_day.get(cursor.isoformat(), 0)})
-        cursor += timedelta(days=1)
+    for offset in range(days_in_month):
+        iso = (first + timedelta(days=offset)).isoformat()
+        month_days.append({"day": iso, "count": month_by_day.get(iso, 0)})
 
     return {
         "day": day.isoformat(),
@@ -208,6 +204,8 @@ class BrandingIn(BaseModel):
             return None
         cleaned = [p.strip() for p in value if p.strip()]
         for p in cleaned:
+            if "\n" in p:
+                raise ValueError("Cada ejemplo no puede tener saltos de línea.")
             if not (2 <= len(p) <= 120):
                 raise ValueError("Cada ejemplo debe tener entre 2 y 120 caracteres.")
         return cleaned or None
@@ -330,12 +328,15 @@ def delete_service(
         "SELECT 1 FROM services WHERE id = ? AND business_id = ?", (service_id, business_id)
     ).fetchone() is None:
         raise HTTPException(404, "El servicio no existe.")
-    try:
-        conn.execute("DELETE FROM services WHERE id = ? AND business_id = ?", (service_id, business_id))
-        conn.commit()
-    except sqlite3.IntegrityError:
-        conn.rollback()
+    in_use = conn.execute(
+        "SELECT 1 FROM appointments WHERE service_id = ? AND business_id = ? "
+        "UNION SELECT 1 FROM waitlist WHERE service_id = ? AND business_id = ?",
+        (service_id, business_id, service_id, business_id),
+    ).fetchone()
+    if in_use:
         raise HTTPException(409, "No se puede eliminar: tiene turnos asociados. Desactivalo en su lugar.")
+    conn.execute("DELETE FROM services WHERE id = ? AND business_id = ?", (service_id, business_id))
+    conn.commit()
     return {"deleted": service_id}
 
 
@@ -423,6 +424,15 @@ def delete_professional(
         "SELECT 1 FROM professionals WHERE id = ? AND business_id = ?", (professional_id, business_id)
     ).fetchone() is None:
         raise HTTPException(404, "El profesional no existe.")
+    in_use = conn.execute(
+        "SELECT 1 FROM appointments WHERE professional_id = ? AND business_id = ? "
+        "UNION SELECT 1 FROM waitlist WHERE professional_id = ? AND business_id = ?",
+        (professional_id, business_id, professional_id, business_id),
+    ).fetchone()
+    if in_use:
+        raise HTTPException(
+            409, "No se puede eliminar: tiene turnos o lista de espera asociados. Desactivalo en su lugar."
+        )
     conn.execute("BEGIN IMMEDIATE")
     try:
         conn.execute(
@@ -431,11 +441,6 @@ def delete_professional(
         )
         conn.execute("DELETE FROM professionals WHERE id = ? AND business_id = ?", (professional_id, business_id))
         conn.commit()
-    except sqlite3.IntegrityError:
-        conn.rollback()
-        raise HTTPException(
-            409, "No se puede eliminar: tiene turnos o lista de espera asociados. Desactivalo en su lugar."
-        )
     except Exception:
         conn.rollback()
         raise

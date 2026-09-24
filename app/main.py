@@ -236,14 +236,13 @@ def availability(
     if professional_id is not None and professional_id not in dict(catalog.professionals):
         raise HTTPException(400, "Profesional inexistente")
     try:
-        year, mo = (int(p) for p in month.split("-"))
-        first = date(year, mo, 1)
+        year, mo = flow.parse_month(month)
+        first, last = flow.month_bounds(year, mo)
     except (ValueError, TypeError):
         raise HTTPException(400, "Mes inválido. Usá el formato YYYY-MM.")
     months_ahead = (year - now.year) * 12 + (mo - now.month)
     if not (0 <= months_ahead <= MAX_CALENDAR_MONTHS_AHEAD):
         raise HTTPException(400, "Ese mes está fuera del rango disponible para reservar.")
-    last = date(year + mo // 12, mo % 12 + 1, 1) - timedelta(days=1)
     start = max(first, now.date())
     days_available: list[date] = []
     if start <= last:
