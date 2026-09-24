@@ -67,6 +67,85 @@ def test_dia_sin_atencion_ofrece_el_proximo_dia(client):
     assert "próximo día" in data["reply"]
 
 
+def test_negocio_sin_profesionales_arranca_uno_implicito_al_chatear(client):
+    signup = client.post(
+        "/api/signup",
+        json={
+            "business_name": "Nuevo Negocio",
+            "email": "solo@x.com",
+            "password": "clave1234",
+            "confirm_password": "clave1234",
+        },
+    ).json()
+    headers = {"X-Session-Token": signup["session_token"]}
+    slug = signup["business"]["slug"]
+    client.post("/api/admin/services", json={"name": "Corte", "duration_min": 30}, headers=headers)
+    assert client.get("/api/admin/professionals", headers=headers).json()["professionals"] == []
+
+    usar_modelo('{"action":"book","service":"Corte","day":"manana"}')
+    client.post(f"/api/b/{slug}/chat", json={"message": "quiero un corte mañana", "context": {}})
+
+    profesionales = client.get("/api/admin/professionals", headers=headers).json()["professionals"]
+    assert [p["name"] for p in profesionales] == ["Nuevo Negocio"]
+
+
+def test_unico_servicio_no_se_pregunta_cual_y_se_ofrecen_horarios(client):
+    signup = client.post(
+        "/api/signup",
+        json={
+            "business_name": "Barbería Sola",
+            "email": "sola@x.com",
+            "password": "clave1234",
+            "confirm_password": "clave1234",
+        },
+    ).json()
+    headers = {"X-Session-Token": signup["session_token"]}
+    slug = signup["business"]["slug"]
+    client.post("/api/admin/services", json={"name": "Corte", "duration_min": 30}, headers=headers)
+    profesional = client.post("/api/admin/professionals", json={"name": "Juan"}, headers=headers).json()
+    client.put(
+        "/api/admin/working-hours",
+        json={"professional_id": profesional["id"], "weekday": 1, "ranges": [{"start": "09:00", "end": "13:00"}]},
+        headers=headers,
+    )  # martes 22/09, el dia siguiente al "hoy" fijo de los tests (lunes 21/09)
+
+    usar_modelo('{"action":"book","day":"manana"}')  # el cliente no menciona ningun servicio
+    data = client.post(f"/api/b/{slug}/chat", json={"message": "quiero un turno para mañana", "context": {}}).json()
+
+    assert "qué servicio" not in data["reply"].lower()
+    assert data["options"]
+    assert all(o["professional_name"] == "Juan" for o in data["options"])
+    servicio_id = client.get("/api/admin/services", headers=headers).json()["services"][0]["id"]
+    assert data["context"]["service_id"] == servicio_id
+
+
+def test_negocio_sin_nada_configurado_arranca_servicio_y_profesional_al_chatear(client):
+    signup = client.post(
+        "/api/signup",
+        json={
+            "business_name": "Negocio Vacío",
+            "email": "vacio@x.com",
+            "password": "clave1234",
+            "confirm_password": "clave1234",
+        },
+    ).json()
+    headers = {"X-Session-Token": signup["session_token"]}
+    slug = signup["business"]["slug"]
+    assert client.get("/api/admin/services", headers=headers).json()["services"] == []
+    assert client.get("/api/admin/professionals", headers=headers).json()["professionals"] == []
+
+    usar_modelo('{"action":"book","day":"manana"}')
+    data = client.post(f"/api/b/{slug}/chat", json={"message": "quiero un turno para mañana", "context": {}}).json()
+    servicios = client.get("/api/admin/services", headers=headers).json()["services"]
+    assert [(s["name"], s["duration_min"]) for s in servicios] == [("Turno", 30)]
+    # con un unico servicio y un unico profesional (ambos implicitos), no hace falta preguntar
+    # cual: se pasa directo a buscar horarios (no hay, porque el profesional no tiene horarios cargados).
+    assert data["context"]["service_id"] == servicios[0]["id"]
+    assert "No encontré horarios" in data["reply"]
+    profesionales = client.get("/api/admin/professionals", headers=headers).json()["professionals"]
+    assert [p["name"] for p in profesionales] == ["Negocio Vacío"]
+
+
 def test_falla_del_modelo_devuelve_503_amigable(client):
     usar_modelo(LLMError("caido"))
     resp = chat(client, "quiero un turno")

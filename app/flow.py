@@ -10,7 +10,7 @@ import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 
-from app import scheduling
+from app import scheduling, tenancy
 from app.agents.interpreter import WEEKDAYS, Catalog, Intent, interpret, load_catalog
 from app.llm.base import LLMProvider
 
@@ -190,6 +190,16 @@ def handle_message(
 ) -> ChatResult:
     today = now.date()
     catalog = load_catalog(conn, business_id)
+    if not catalog.professionals or not catalog.services:
+        # Negocios dados de alta antes de este fix, o que borraron su unico profesional/servicio,
+        # tambien tienen que poder recibir turnos sin pasar por el panel primero.
+        if not catalog.professionals:
+            business = tenancy.get_by_id(conn, business_id)
+            tenancy.ensure_default_professional(conn, business_id, business["name"])
+        if not catalog.services:
+            tenancy.ensure_default_service(conn, business_id)
+        conn.commit()
+        catalog = load_catalog(conn, business_id)
     ctx = sanitize_context(ctx, catalog, today)
     intent: Intent = interpret(message, catalog, today, provider)
 
@@ -210,6 +220,8 @@ def handle_message(
         )
 
     service_id = intent.service_id or ctx.service_id
+    if service_id is None and len(catalog.services) == 1:
+        service_id = catalog.services[0][0]  # unico servicio: no hace falta preguntar cual
     professional_id = intent.professional_id or ctx.professional_id
     day = intent.day or ctx.day
     merged = Context(service_id, professional_id, day)

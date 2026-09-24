@@ -89,6 +89,34 @@ def create(conn: sqlite3.Connection, name: str, email: str, password: str, plan:
     return get_by_id(conn, cur.lastrowid)
 
 
+def ensure_default_professional(conn: sqlite3.Connection, business_id: int, business_name: str) -> None:
+    """Si el negocio no tiene ningun profesional, crea uno implicito para que pueda recibir turnos."""
+    if professional_count(conn, business_id):
+        return
+    conn.execute(
+        "INSERT INTO professionals (business_id, name, active) VALUES (?, ?, 1)",
+        (business_id, business_name),
+    )
+
+
+DEFAULT_SERVICE_NAME = "Turno"
+DEFAULT_SERVICE_DURATION_MIN = 30
+
+
+def service_count(conn: sqlite3.Connection, business_id: int) -> int:
+    return conn.execute("SELECT COUNT(*) FROM services WHERE business_id = ?", (business_id,)).fetchone()[0]
+
+
+def ensure_default_service(conn: sqlite3.Connection, business_id: int) -> None:
+    """Si el negocio no tiene ningun servicio, crea uno generico para que pueda recibir turnos."""
+    if service_count(conn, business_id):
+        return
+    conn.execute(
+        "INSERT INTO services (business_id, name, duration_min, active) VALUES (?, ?, ?, 1)",
+        (business_id, DEFAULT_SERVICE_NAME, DEFAULT_SERVICE_DURATION_MIN),
+    )
+
+
 def authenticate(conn: sqlite3.Connection, email: str, password: str) -> sqlite3.Row | None:
     row = get_by_email(conn, email)
     if row is None or not auth.verify_password(password, row["password_hash"]):
